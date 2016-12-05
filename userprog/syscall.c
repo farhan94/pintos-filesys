@@ -145,10 +145,10 @@ syscall_handler(struct intr_frame *f) {
         case SYS_MKDIR:{
             check_bad_ptr(*(void**)(f->esp + 4));
             char* dir = *(char **) (f->esp + 4);
-            f->eax = mkdir((const char*)dir);
+           // f->eax = mkdir((const char*)dir);
             break;
         }
-        case SYS_
+   //     case SYS_
     }
 }
 

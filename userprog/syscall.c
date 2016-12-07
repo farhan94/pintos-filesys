@@ -8,6 +8,7 @@ typedef int pid_t;
 
 static void syscall_handler(struct intr_frame *);
 void check_bad_ptr(void* arg_ptr);
+bool mkdir(const char *dir);
 
 get_user (const uint8_t *uaddr)
 {
@@ -145,7 +146,7 @@ syscall_handler(struct intr_frame *f) {
         case SYS_MKDIR:{
             check_bad_ptr(*(void**)(f->esp + 4));
             char* dir = *(char **) (f->esp + 4);
-           // f->eax = mkdir((const char*)dir);
+            f->eax = mkdir((const char*)dir);
             break;
         }
    //     case SYS_

@@ -20,14 +20,14 @@ struct inode_disk
     unsigned magic;                     /* Magic number. */
   //  uint32_t unused[125];               /* Not used. */
     bool is_directory;
-    block_sector_t direct[123]; //the direct block
+    block_sector_t direct[DIRECT_BLOCKS]; //the direct block
     block_sector_t indirect;  //indirect block->contains 127
     block_sector_t doubly_indirect;  //doubly indirect-> each indirect element has one indrect block
 
   };
 
 struct indirect_block_sec{
-  block_sector_t direct[128];
+  block_sector_t direct[INDIRECT_BLOCKS];
 };
 /* Returns the number of sectors to allocate for an inode SIZE
    bytes long. */
@@ -178,33 +178,36 @@ bool inode_dealloc(struct inode *inode){
 static block_sector_t
 byte_to_sector (const struct inode *inode, off_t pos) 
 {
+  //printf("\n\n%d\n\n\n", pos);
    ASSERT (inode != NULL);
   // if (pos < inode->data.length)
   //   return inode->data.start + pos / BLOCK_SECTOR_SIZE;
   // else
   //   return -1;
   uint32_t block_index = pos/BLOCK_SECTOR_SIZE;
-  if(block_index<=122){
+  if(block_index<=DIRECT_BLOCKS-1){
     return inode->data.direct[block_index];
   }
-  else if(block_index >122 && block_index <= 250){
-    block_index -= 123;
+  else if(block_index >DIRECT_BLOCKS-1 && block_index <= INDIRECT_BLOCKS+DIRECT_BLOCKS){
+    block_index -= DIRECT_BLOCKS;
     struct indirect_block_sec ibs;
     block_read(fs_device, inode->data.indirect, &ibs);
     return ibs.direct[block_index];
   }
   else{
+
     struct indirect_block_sec ibs;
-    block_index -= 123;
-    block_index -= 128;
+    block_index -= DIRECT_BLOCKS;
+    block_index -= INDIRECT_BLOCKS;
     block_read(fs_device, inode->data.doubly_indirect, &ibs);
    // pos-=BLOCK_SECTOR_SIZE*(123+128*128);
    // block_index = pos / (BLOCK_SECTOR_SIZE*128);
-    block_index /= 128;
+    block_index /= INDIRECT_BLOCKS;
     block_read(fs_device, ibs.direct[block_index], &ibs);
-    block_index %= 128;
+    block_index %= INDIRECT_BLOCKS;
     return ibs.direct[block_index];
   }
+
 
   return -1;
 
@@ -420,6 +423,7 @@ off_t
 inode_write_at (struct inode *inode, const void *buffer_, off_t size,
                 off_t offset) 
 {
+
   const uint8_t *buffer = buffer_;
   off_t bytes_written = 0;
   uint8_t *bounce = NULL;
@@ -515,4 +519,11 @@ off_t
 inode_length (const struct inode *inode)
 {
   return inode->data.length;
+}
+
+bool is_directory_inode(struct inode *inode){
+  if(inode->data.is_directory == true){
+    return true;
+  }
+  return false;
 }

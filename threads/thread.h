@@ -16,6 +16,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "filesys/directory.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -115,6 +116,9 @@ struct thread
     struct semaphore child_loaded;  // semaphore signaling when child thread has been loaded
     struct semaphore parent_ready;
     struct file *rox_executable;
+
+    /* Filesys */
+    char cur_dir[DIRNAME_MAX];
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */

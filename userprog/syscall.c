@@ -3,12 +3,17 @@
 #include <syscall-nr.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "filesys/dir-tokenizer.h"
 
 typedef int pid_t;
 
 static void syscall_handler(struct intr_frame *);
 void check_bad_ptr(void* arg_ptr);
-bool mkdir(const char *dir);
+
+static bool create(const char *file, unsigned initial_size);
+static bool remove(const char *file);
+static bool chdir(char const* dir);
+static bool mkdir(const char *dir);
 
 get_user (const uint8_t *uaddr)
 {
@@ -143,6 +148,13 @@ syscall_handler(struct intr_frame *f) {
             close(fd);
             break;
         }
+
+        case SYS_CHDIR: {
+            char const* dir = *(char**)(f->esp + 4);
+            f->eax = chdir(dir);
+            break;
+        }
+
         case SYS_MKDIR:{
             check_bad_ptr(*(void**)(f->esp + 4));
             char* dir = *(char **) (f->esp + 4);
@@ -253,15 +265,15 @@ int wait(pid_t pid) {
 }
 
 
-bool create(const char *file, unsigned initial_size) {
+static bool create(const char *file, unsigned initial_size) {
     /*  Creates a new file called file initially initial_size bytes in size.
       Returns true if successful, false otherwise. Creating a new file does
        not open it: opening the new file is a separate operation which would
        require a open system call. */
-    return filesys_create(file, initial_size);
+    return filesys_create(file, initial_size, false);
 }
 
-bool remove(const char *file) {
+static bool remove(const char *file) {
     /*  Deletes the file called file. Returns true if successful, false otherwise.
       A file may be removed regardless of whether it is open or closed, and removing
        an open file does not close it. See Removing an Open File, for details.*/
@@ -421,7 +433,8 @@ void check_bad_ptr(void* arg_ptr) {
  * which may be relative or absolute. Returns true if successful, false on failure.
  */
 bool chdir(const char *dir) {
-
+    printf("In chdir\n");
+    // dirtok_test();
 }
 
 /*

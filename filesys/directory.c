@@ -255,7 +255,7 @@ dir_remove (struct dir *dir, const char *name)
   success = true;
 
  done:
-  /* Check that dir is not empty */
+  /* Check if dir is not empty */
   dir = dir_open(inode);
   char buf[NAME_MAX];
   while (dir_readdir(dir, buf)) {
@@ -283,6 +283,9 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
       dir->pos += sizeof e;
       if (e.in_use)
         {
+          if (strcmp(e.name, ".") == 0 || strcmp(e.name, "..") == 0) {
+            continue;
+          }
           strlcpy (name, e.name, NAME_MAX + 1);
           return true;
         } 

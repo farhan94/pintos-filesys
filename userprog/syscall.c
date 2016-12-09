@@ -15,7 +15,9 @@ static bool create(const char *file, unsigned initial_size);
 static bool remove(const char *file);
 static bool chdir(char const* dir);
 static bool mkdir(const char *dir);
-static bool readdir(int fd, char const* dir);
+static bool readdir(int fd, char* buf);
+static bool isdir(int fd);
+static int inumber(int fd);
 
 get_user (const uint8_t *uaddr)
 {
@@ -165,9 +167,24 @@ syscall_handler(struct intr_frame *f) {
         }
 
         case SYS_READDIR: {
+            check_bad_ptr(*(void**)(f->esp + 8));
             int fd = *(int*)(f->esp + 4);
-            char const* name = *(char const*)(f->esp + 8);
+            char* name = *(char**)(f->esp + 8);
+            // printf("%s\n", name);
             f->eax = readdir(fd, name);
+            break;
+        }
+
+        case SYS_ISDIR: {
+            int fd = *(int*)(f->esp + 4);
+            f->eax = isdir(fd);
+            break;
+        }
+
+        case SYS_INUMBER: {
+            int fd = *(int*)(f->esp + 4);
+            f->eax = inumber(fd);
+            break;
         }
    //     case SYS_
     }
@@ -316,20 +333,32 @@ int open(const char *file) {
 //    fd_elem->file = openfile;
 //    list_push_back(&thread_current()->fd_list, &fd_elem->element);
 //    return updated_fd;
-
+    // printf("syscall (open): trying to open file/dir %s\n", file);
     struct fd_elem *fe = (struct fd_elem*) malloc(sizeof(struct fd_elem));
-    struct file *f = filesys_open(file);
-    if(f == NULL){
+    fe->fd = thread_current()->next_file;
+    struct inode* inode = filesys_open_inode(file);
+    if (!inode) {
+        // printf("syscall (open): no dir/file exists.\n");
         return -1;
     }
-    fe->fd = thread_current()->next_file;
-    fe->file = f;
-    fe->isdir = fe->file->inode->data.is_directory;
-    if (fe->isdir) {
-        fe->file = f;
+    // printf("inode is a directory: %d\n", inode_is_dir(inode));
+    if (inode_is_dir(inode)) {
+        fe->isdir = true;
+        struct dir* dir = dir_open(inode);
+        if (!dir) {
+            // printf("Problem opening inode\n");
+            return -1;
+        }
+        fe->dir = dir;
     }
     else {
-        fe->dir = f;
+        fe->isdir = false;
+        struct file* file = file_open(inode);
+        if (!file) {
+            // printf("Problem opening file\n");
+            return -1;
+        }
+        fe->file = file;
     }
     thread_current()->next_file = thread_current()->next_file + 1;
     list_push_back(&thread_current()->fd_list, &fe->element);
@@ -487,17 +516,18 @@ If the directory changes while it is open, then it is acceptable for some entrie
 READDIR_MAX_LEN is defined in "lib/user/syscall.h". If your file system supports longer
  file names than the basic file system, you should increase this value from the default of 14.
  */
-bool readdir(int fd, char const *name){
+bool readdir(int fd, char* buf){
+    // printf("reading fd %d with name %s\n", fd, name);
     struct fd_elem* fe = get_fd_element(fd);
     if (!fe->isdir) {
         return false;
     }
     bool res;
-    while (res = dir_readdir(fe->dir, name)) {
-        if (strcmp(".", name) == 0 || strcmp("..", name) == 0) {
+    while (res = dir_readdir(fe->dir, buf)) {
+        if (strcmp(".", buf) == 0 || strcmp("..", buf) == 0) {
             continue;
         }
-        printf("in directory is %s\n", name);
+        // printf("in directory is %s\n", name);
         return res;
     }
     

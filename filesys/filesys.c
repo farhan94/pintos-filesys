@@ -130,27 +130,32 @@ struct inode*
 filesys_open_inode(char const* name) {
   if (*name == '/' && *(name + 1) == '\0') {  // if root, just return the root inode
     struct dir* dir = dir_open_root();
-    dir->inode;
+    return dir->inode;
   }
   //printf("\n\n\n@@@HERE\n\n\n");
   char path[DIRNAME_MAX];
   dirtok_get_abspath_updir(name, path);
-  // printf("opening file/dir %s\n", path);
-  struct dir *dir = dir_open_path(path);
-  struct inode *inode = NULL;
+  struct dir* dir = dir_open_path(path);
+  if (!dir) {
+    // printf("filesys (filesys_open_inode): parent dir does not exist.\n");
+    return NULL;
+  }
+
+  struct inode* inode = NULL;
 
   char filename[NAME_MAX];
   dirtok_get_filename(name, filename);
 
-  bool success;
-  if (dir != NULL) {
-    success = dir_lookup (dir, filename, &inode);
+  // printf("filesys (filesys_open_inode): opening file/dir %s from dir %s\n", filename, path);
+
+  if (dir_lookup(dir, filename, &inode)) {
+    // printf("filesys (filesys_open_inode): found file to open\n");
+    dir_close(dir);
+    return inode;
   }
 
-  // printf("Dir lookup succeeded in open: %d\n", success);
-  dir_close (dir);
-
-  return inode;
+  dir_close(dir);
+  return NULL;
 }
 
 /* Deletes the file named NAME.
@@ -167,11 +172,18 @@ filesys_remove (const char *name)
     return false;
   }
   dirtok_get_abspath_updir(name, path);
+  // printf("filesys (filesys_remove): file/dir's parent dir is %s\n", path);
   struct dir* dir = dir_open_path(path);
+ 
+  if (!dir) {
+    // printf("filesys (filesys_remove): dir does not exist.\n");
+    return false;
+  }
 
   char filename[NAME_MAX];
   dirtok_get_filename(name, filename);
   // printf("Removing %s from %s\n", filename, path);
+
   bool success = dir != NULL && dir_remove (dir, filename);
   dir_close (dir); 
   return success;

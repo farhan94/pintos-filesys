@@ -67,6 +67,14 @@ filesys_create (const char *name, off_t initial_size, bool is_dir)
                         && free_map_allocate(1, &inode_sector)
                         && dir_create(inode_sector, 0)
                         && dir_add(dir, filename, inode_sector);
+    /* Add the "." and ".." hard links */
+    block_sector_t parent_inode_sector = dir->inode->sector;
+    dirtok_get_abspath(name, path);
+    dir = dir_open_path(path);
+    success = success
+                        && dir_add(dir, ".", inode_sector)
+                        && dir_add(dir, "..", parent_inode_sector);
+    int t;
   }
   else {
     success = dir != NULL
@@ -93,9 +101,14 @@ filesys_create (const char *name, off_t initial_size, bool is_dir)
 struct file *
 filesys_open (const char *name)
 {
+  if (*name == '/' && *(name + 1) == '\0') {  // if root, just return the root inode
+    struct dir* dir = dir_open_root();
+    return file_open(dir->inode);
+  }
   //printf("\n\n\n@@@HERE\n\n\n");
   char path[DIRNAME_MAX];
   dirtok_get_abspath_updir(name, path);
+  // printf("opening file/dir %s\n", path);
   struct dir *dir = dir_open_path(path);
   struct inode *inode = NULL;
 
@@ -103,12 +116,41 @@ filesys_open (const char *name)
   dirtok_get_filename(name, filename);
 
   bool success;
-  if (dir != NULL)
+  if (dir != NULL) {
     success = dir_lookup (dir, filename, &inode);
+  }
+
   // printf("Dir lookup succeeded in open: %d\n", success);
   dir_close (dir);
 
   return file_open (inode);
+}
+
+struct inode*
+filesys_open_inode(char const* name) {
+  if (*name == '/' && *(name + 1) == '\0') {  // if root, just return the root inode
+    struct dir* dir = dir_open_root();
+    dir->inode;
+  }
+  //printf("\n\n\n@@@HERE\n\n\n");
+  char path[DIRNAME_MAX];
+  dirtok_get_abspath_updir(name, path);
+  // printf("opening file/dir %s\n", path);
+  struct dir *dir = dir_open_path(path);
+  struct inode *inode = NULL;
+
+  char filename[NAME_MAX];
+  dirtok_get_filename(name, filename);
+
+  bool success;
+  if (dir != NULL) {
+    success = dir_lookup (dir, filename, &inode);
+  }
+
+  // printf("Dir lookup succeeded in open: %d\n", success);
+  dir_close (dir);
+
+  return inode;
 }
 
 /* Deletes the file named NAME.

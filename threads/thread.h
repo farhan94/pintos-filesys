@@ -137,6 +137,8 @@ struct fd_elem{
     unsigned fd;
     struct file *file;
     struct list_elem element;
+    struct dir* dir;
+    bool isdir;
 };
 
 

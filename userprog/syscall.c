@@ -4,6 +4,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "filesys/dir-tokenizer.h"
+#include "filesys/file.h"
 
 typedef int pid_t;
 
@@ -14,6 +15,7 @@ static bool create(const char *file, unsigned initial_size);
 static bool remove(const char *file);
 static bool chdir(char const* dir);
 static bool mkdir(const char *dir);
+static bool readdir(int fd, char const* dir);
 
 get_user (const uint8_t *uaddr)
 {
@@ -160,6 +162,12 @@ syscall_handler(struct intr_frame *f) {
             char* dir = *(char **) (f->esp + 4);
             f->eax = mkdir((const char*)dir);
             break;
+        }
+
+        case SYS_READDIR: {
+            int fd = *(int*)(f->esp + 4);
+            char const* name = *(char const*)(f->esp + 8);
+            f->eax = readdir(fd, name);
         }
    //     case SYS_
     }
@@ -315,6 +323,14 @@ int open(const char *file) {
         return -1;
     }
     fe->fd = thread_current()->next_file;
+    fe->file = f;
+    fe->isdir = fe->file->inode->data.is_directory;
+    if (fe->isdir) {
+        fe->file = f;
+    }
+    else {
+        fe->dir = f;
+    }
     thread_current()->next_file = thread_current()->next_file + 1;
     list_push_back(&thread_current()->fd_list, &fe->element);
     return fe->fd;
@@ -471,15 +487,28 @@ If the directory changes while it is open, then it is acceptable for some entrie
 READDIR_MAX_LEN is defined in "lib/user/syscall.h". If your file system supports longer
  file names than the basic file system, you should increase this value from the default of 14.
  */
-bool readdir(int fd, char *name){
-
+bool readdir(int fd, char const *name){
+    struct fd_elem* fe = get_fd_element(fd);
+    if (!fe->isdir) {
+        return false;
+    }
+    bool res;
+    while (res = dir_readdir(fe->dir, name)) {
+        if (strcmp(".", name) == 0 || strcmp("..", name) == 0) {
+            continue;
+        }
+        printf("in directory is %s\n", name);
+        return res;
+    }
+    
 }
 
 /*
  * Returns true if fd represents a directory, false if it represents an ordinary file.
  */
 bool isdir(int fd){
-    
+    struct fd_elem* fe = get_fd_element(fd);
+    return fe->isdir;
 }
 
 /*
@@ -491,5 +520,27 @@ An inode number persistently identifies a file or directory. It is unique during
  use as an inode number.
  */
 int inumber(int fd){
-
+    struct thread *t = thread_current();
+    struct list_elem *e;
+ 
+    struct fd_elem *fd_e = NULL;
+    for (e = list_begin(&t->fd_list); e != list_end(&t->fd_list); e = list_next(e)) {
+        fd_e = list_entry(e, struct fd_elem, element);
+        if (fd == fd_e->fd) {
+            break;
+        }
+    }
+    if(fd_e == NULL){
+        //file not found
+    }
+    //TODO: might have to add some error check if file doesnt exist
+ 
+    block_sector_t inum;
+    //TODO: someone needs to update isdir in the fd_list, fd_elem
+    if (fd_e->isdir) {
+        inum = inode_get_inumber(dir_get_inode(fd_e->dir));
+    } else {
+        inum = inode_get_inumber(file_get_inode(fd_e->file));
+    }
+    return inum;
 }

@@ -82,6 +82,7 @@ dir_open_path(char const* pathname) {
       cur_dir = dir_open(cur_inode);
     }
     else {
+      // printf("uh oh\n");
       inode_close(cur_inode);
       return NULL;
     }
@@ -257,7 +258,11 @@ dir_remove (struct dir *dir, const char *name)
   /* Check that dir is not empty */
   dir = dir_open(inode);
   char buf[NAME_MAX];
-  if (dir_readdir(dir, buf)) {
+  while (dir_readdir(dir, buf)) {
+    if (strcmp(".", buf) == 0 || strcmp("..", buf) == 0) {
+      // printf("found link . or ..\n");
+      continue;
+    }
     // printf("Found %s in dir\n", buf);
     return false;
   }

@@ -65,12 +65,15 @@ dir_open_root (void)
   return dir_open (inode_open (ROOT_DIR_SECTOR));
 }
 
-/* Open a directory given its full absolute path. */
+/*
+  * Open a directory given its full absolute path.
+  * Returns nullptr on failure.
+  */
 struct dir*
 dir_open_path(char const* pathname) {
   struct dir* cur_dir = dir_open_root();
   struct inode* cur_inode;
-  char dirname[NAME_MAX];
+  char dirname[DIRNAME_MAX];
   dirtok_init(pathname);
   while (dirtok_next(dirname)) {
     // printf("Opening next directory: %s\n", dirname);
@@ -79,8 +82,8 @@ dir_open_path(char const* pathname) {
       cur_dir = dir_open(cur_inode);
     }
     else {
-      printf("Problem opening directory.\n");
-      exit(-1);
+      inode_close(cur_inode);
+      return NULL;
     }
   }
   return cur_dir;
@@ -170,6 +173,7 @@ dir_lookup (const struct dir *dir, const char *name,
 bool
 dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
 {
+  // printf("adding dir %s\n", name);
   struct dir_entry e;
   off_t ofs;
   bool success = false;
@@ -178,12 +182,22 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   ASSERT (name != NULL);
 
   /* Check NAME for validity. */
-  if (*name == '\0' || strlen (name) > NAME_MAX)
+  if (*name == '\0' || strlen (name) > NAME_MAX) {
+    // printf("failed here\n");
     return false;
+  }
+  
+  // char buf[NAME_MAX];
+  // while (dir_readdir(dir, buf)) {
+  //   printf("%s\n", name);
+  // }
 
   /* Check that NAME is not in use. */
-  if (lookup (dir, name, NULL, NULL))
+  if (lookup (dir, name, NULL, NULL)) {
+    // printf("file/dir already exists\n");
     goto done;
+  }
+    
 
   /* Set OFS to offset of free slot.
      If there are no free slots, then it will be set to the
@@ -240,6 +254,13 @@ dir_remove (struct dir *dir, const char *name)
   success = true;
 
  done:
+  /* Check that dir is not empty */
+  dir = dir_open(inode);
+  char buf[NAME_MAX];
+  if (dir_readdir(dir, buf)) {
+    // printf("Found %s in dir\n", buf);
+    return false;
+  }
   inode_close (inode);
   return success;
 }

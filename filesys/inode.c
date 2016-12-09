@@ -1,4 +1,5 @@
 #include "filesys/inode.h"
+
 #include <list.h>
 #include <debug.h>
 #include <round.h>
@@ -7,24 +8,6 @@
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
 
-/* Identifies an inode. */
-#define INODE_MAGIC 0x494e4f44
-#define DIRECT_BLOCKS 123
-#define INDIRECT_BLOCKS 128
-/* On-disk inode.
-   Must be exactly BLOCK_SECTOR_SIZE bytes long. */
-struct inode_disk
-  {
-    
-    off_t length;                       /* File size in bytes. */
-    unsigned magic;                     /* Magic number. */
-  //  uint32_t unused[125];               /* Not used. */
-    bool is_directory;
-    block_sector_t direct[DIRECT_BLOCKS]; //the direct block
-    block_sector_t indirect;  //indirect block->contains 127
-    block_sector_t doubly_indirect;  //doubly indirect-> each indirect element has one indrect block
-
-  };
 
 struct indirect_block_sec{
   block_sector_t direct[INDIRECT_BLOCKS];
@@ -36,17 +19,6 @@ bytes_to_sectors (off_t size)
 {
   return DIV_ROUND_UP (size, BLOCK_SECTOR_SIZE);
 }
-
-/* In-memory inode. */
-struct inode 
-  {
-    struct list_elem elem;              /* Element in inode list. */
-    block_sector_t sector;              /* Sector number of disk location. */
-    int open_cnt;                       /* Number of openers. */
-    bool removed;                       /* True if deleted, false otherwise. */
-    int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
-    struct inode_disk data;             /* Inode content. */
-  };
 
 /*allocates space in the inode stuff */
 bool inode_alloc(struct inode_disk *disk_inode, off_t length){
@@ -521,7 +493,7 @@ inode_length (const struct inode *inode)
   return inode->data.length;
 }
 
-bool is_directory_inode(struct inode *inode){
+bool inode_is_dir(struct inode *inode){
   if(inode->data.is_directory == true){
     return true;
   }

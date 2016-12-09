@@ -13,7 +13,7 @@ char dirname_cur[NAME_MAX];
 char* dir_ptr;
 
 void dirtok_init(char const* dirname) {
-    strlcpy(dirname_full, dirname, sizeof(dirname_full));
+    strlcpy(dirname_full, dirname, strlen(dirname) + 1);
     // printf("Full dirname: %s\n", dirname_full);
     dir_ptr = dirname_full;
 }
@@ -90,7 +90,7 @@ void dirtok_get_abspath_updir(char const* pathname, char* buf) {
 void dirtok_get_abspath(char const* pathname, char* buf) {
     // printf("Getting abspath of %s\n", pathname);
     if (*pathname == '/') { // absolute
-        strlcpy(buf, pathname, sizeof(buf));
+        strlcpy(buf, pathname, strlen(pathname) + 1);
     }
     else {                        // relative
         strlcpy(buf, thread_current()->cur_dir, strlen(thread_current()->cur_dir) + 1);

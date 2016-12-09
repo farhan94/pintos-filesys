@@ -6,6 +6,7 @@
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "filesys/dir-tokenizer.h"
 #include "threads/thread.h"
 
 /* Partition that contains the file system. */
@@ -46,6 +47,10 @@ filesys_done (void)
 bool
 filesys_create (const char *name, off_t initial_size, bool is_dir) 
 {
+  // printf("creating file/dir %s\n", name);
+  if (strlen(name) > NAME_MAX) {
+    return false;
+  }
   block_sector_t inode_sector = 0;
   /* Check if name is absolute or relative */
   char path[DIRNAME_MAX];
@@ -55,10 +60,21 @@ filesys_create (const char *name, off_t initial_size, bool is_dir)
   char filename[NAME_MAX];
   dirtok_get_filename(name, filename);
 
-  bool success = (dir != NULL
-                  && free_map_allocate (1, &inode_sector)
-                  && inode_create (inode_sector, initial_size, is_dir)
-                  && dir_add (dir, filename, inode_sector));
+  bool success;
+  if (is_dir) {
+    // printf("making dir %s in %s\n", filename, path);
+    success = dir != NULL
+                        && free_map_allocate(1, &inode_sector)
+                        && dir_create(inode_sector, 0)
+                        && dir_add(dir, filename, inode_sector);
+  }
+  else {
+    success = dir != NULL
+                      && free_map_allocate (1, &inode_sector)
+                      && inode_create (inode_sector, initial_size, false)
+                      && dir_add (dir, filename, inode_sector);
+  }
+  
   if (!success && inode_sector != 0) 
     free_map_release (inode_sector, 1);
   dir_close (dir);
@@ -83,9 +99,12 @@ filesys_open (const char *name)
   struct dir *dir = dir_open_path(path);
   struct inode *inode = NULL;
 
+  char filename[NAME_MAX];
+  dirtok_get_filename(name, filename);
+
   bool success;
   if (dir != NULL)
-    success = dir_lookup (dir, name, &inode);
+    success = dir_lookup (dir, filename, &inode);
   // printf("Dir lookup succeeded in open: %d\n", success);
   dir_close (dir);
 
@@ -99,10 +118,20 @@ filesys_open (const char *name)
 bool
 filesys_remove (const char *name) 
 {
-  struct dir *dir = dir_open_root ();
-  bool success = dir != NULL && dir_remove (dir, name);
-  dir_close (dir); 
+  char path[DIRNAME_MAX];
+  dirtok_get_abspath(name, path);
+  if (*path == '/' && *(path + 1) == '\0') { // can't remove root directory'
+    // printf("can't remove root\n'");
+    return false;
+  }
+  dirtok_get_abspath_updir(name, path);
+  struct dir* dir = dir_open_path(path);
 
+  char filename[NAME_MAX];
+  dirtok_get_filename(name, filename);
+  // printf("Removing %s from %s\n", filename, path);
+  bool success = dir != NULL && dir_remove (dir, filename);
+  dir_close (dir); 
   return success;
 }
 

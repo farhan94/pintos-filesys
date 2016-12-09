@@ -4,6 +4,7 @@
 #include <list.h>
 #include "filesys/filesys.h"
 #include "filesys/inode.h"
+#include "filesys/dir-tokenizer.h"
 #include "threads/malloc.h"
 
 /* A directory. */
@@ -62,6 +63,27 @@ struct dir *
 dir_open_root (void)
 {
   return dir_open (inode_open (ROOT_DIR_SECTOR));
+}
+
+/* Open a directory given its full absolute path. */
+struct dir*
+dir_open_path(char const* pathname) {
+  struct dir* cur_dir = dir_open_root();
+  struct inode* cur_inode;
+  char dirname[NAME_MAX];
+  dirtok_init(pathname);
+  while (dirtok_next(dirname)) {
+    // printf("Opening next directory: %s\n", dirname);
+    if (dir_lookup(cur_dir, dirname, &cur_inode)) {
+      // printf("Directory successfully opened: %s\n", dirname);
+      cur_dir = dir_open(cur_inode);
+    }
+    else {
+      printf("Problem opening directory.\n");
+      exit(-1);
+    }
+  }
+  return cur_dir;
 }
 
 /* Opens and returns a new directory for the same inode as DIR.

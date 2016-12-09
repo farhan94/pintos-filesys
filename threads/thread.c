@@ -232,6 +232,9 @@ thread_create (const char *name, int priority,
   list_push_back(&thread_current()->children_exit, &ee->elem);
   list_push_back(&thread_current()->children, &t->child_elem);
 
+  /* Inherit dirname from current thread */
+  strlcpy(t->cur_dir, thread_current()->cur_dir, sizeof(t->cur_dir));
+
   /* Add to run queue. */
   thread_unblock (t);
 

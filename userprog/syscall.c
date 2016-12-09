@@ -432,8 +432,17 @@ void check_bad_ptr(void* arg_ptr) {
  * Changes the current working directory of the process to dir,
  * which may be relative or absolute. Returns true if successful, false on failure.
  */
-bool chdir(const char *dir) {
-    printf("In chdir\n");
+bool chdir(const char *dirname) {
+    // printf("In chdir\n");
+    char path[DIRNAME_MAX];
+    dirtok_get_abspath(dirname, path);
+    struct dir* dir = dir_open_path(path);
+    if (dir) {
+        strlcpy(thread_current()->cur_dir, path, strlen(path) + 1);
+        // printf("Current thread's directory is now %s\n", thread_current()->cur_dir);
+        return true;
+    }
+    return false;
     // dirtok_test();
 }
 
@@ -470,7 +479,7 @@ bool readdir(int fd, char *name){
  * Returns true if fd represents a directory, false if it represents an ordinary file.
  */
 bool isdir(int fd){
-
+    
 }
 
 /*

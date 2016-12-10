@@ -264,11 +264,7 @@ dir_remove (struct dir *dir, const char *name)
   /* Check if dir is not empty */
   dir = dir_open(inode);
   char buf[NAME_MAX + 1];
-  while (dir_readdir(dir, buf)) {
-    if (strcmp(".", buf) == 0 || strcmp("..", buf) == 0) {
-      // printf("found link . or ..\n");
-      continue;
-    }
+  if (dir_readdir(dir, buf)) {
     // printf("Found %s in dir\n", buf);
     return false;
   }
@@ -293,6 +289,7 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
             continue;
           }
           strlcpy (name, e.name, NAME_MAX + 1);
+          // printf("directory (readdir): next dir is %s\n", name);
           return true;
         } 
     }

@@ -350,6 +350,7 @@ int open(const char *file) {
             return -1;
         }
         fe->dir = dir;
+        fe->closed = false;
     }
     else {
         fe->isdir = false;
@@ -359,6 +360,7 @@ int open(const char *file) {
             return -1;
         }
         fe->file = file;
+        fe->closed = false;
     }
     thread_current()->next_file = thread_current()->next_file + 1;
     list_push_back(&thread_current()->fd_list, &fe->element);
@@ -539,15 +541,15 @@ bool readdir(int fd, char* buf){
     if (!fe->isdir) {
         return false;
     }
-    bool res;
-    while (res = dir_readdir(fe->dir, buf)) {
-        if (strcmp(".", buf) == 0 || strcmp("..", buf) == 0) {
-            continue;
-        }
-        // printf("in directory is %s\n", name);
-        return res;
-    }
-    
+    return dir_readdir(fe->dir, buf);
+    // while (res = dir_readdir(fe->dir, buf)) {
+    //     if (strcmp(".", buf) == 0 || strcmp("..", buf) == 0) {
+    //         continue;
+    //     }
+    //     // printf("in directory is %s\n", name);
+    //     return res;
+    // }
+    // return false;
 }
 
 /*

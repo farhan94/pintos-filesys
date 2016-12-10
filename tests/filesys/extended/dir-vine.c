@@ -22,13 +22,13 @@ test_main (void)
   quiet = false;
   CHECK (mkdir ("start"), "mkdir \"start\"");
   CHECK (chdir ("start"), "chdir \"start\"");
-  for (i = 0; i < 10; i++) 
+  for (i = 0; ; i++) 
     {
       char name[3][READDIR_MAX_LEN + 1];
       char file_name[16], dir_name[16];
       char contents[128];
       int fd;
-
+      // msg('next it');
       /* Create file. */
       snprintf (file_name, sizeof file_name, "file%d", i);
       if (!create (file_name, 0))
@@ -65,21 +65,22 @@ test_main (void)
 
       /* Descend into directory. */
       CHECK (chdir (dir_name), "chdir \"%s\"", dir_name);
+      // msg("done with it");
     }
   CHECK (i > 200, "created files and directories only to level %d", i);
   quiet = false;
 
-  msg ("removing all but top 10 levels of files and directories...");
-  quiet = true;
-  while (i-- > 10) 
-    {
-      char file_name[16], dir_name[16];
+  // msg ("removing all but top 10 levels of files and directories...");
+  // quiet = true;
+  // while (i-- > 10) 
+  //   {
+  //     char file_name[16], dir_name[16];
 
-      snprintf (file_name, sizeof file_name, "file%d", i);
-      snprintf (dir_name, sizeof dir_name, "dir%d", i);
-      CHECK (chdir (".."), "chdir \"..\"");
-      CHECK (remove (dir_name), "remove \"%s\"", dir_name);
-      CHECK (remove (file_name), "remove \"%s\"", file_name);
-    }
-  quiet = false;
+  //     snprintf (file_name, sizeof file_name, "file%d", i);
+  //     snprintf (dir_name, sizeof dir_name, "dir%d", i);
+  //     CHECK (chdir (".."), "chdir \"..\"");
+  //     CHECK (remove (dir_name), "remove \"%s\"", dir_name);
+  //     CHECK (remove (file_name), "remove \"%s\"", file_name);
+  //   }
+  // quiet = false;
 }

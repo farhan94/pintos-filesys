@@ -8,12 +8,12 @@
 #include "filesys/directory.h"
 #include "threads/thread.h"
 
-char dirname_full[DIRNAME_MAX + 1];
+char* dirname_full;
 char dirname_cur[NAME_MAX + 1];
 char* dir_ptr;
 
 void dirtok_init(char const* dirname) {
-    // dirname_full = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
+    dirname_full = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
     strlcpy(dirname_full, dirname, strlen(dirname) + 1);
     // printf("Full dirname: %s\n", dirname_full);
     dir_ptr = dirname_full;
@@ -25,7 +25,7 @@ void dirtok_init(char const* dirname) {
 bool dirtok_next(char* buf) {
     // return false;
     if (*dir_ptr == '\0') {
-        // free(dirname_full);
+        free(dirname_full);
         return false;
     }
     while (*dir_ptr == '/') {    // skip all consecutive "/"
@@ -37,7 +37,7 @@ bool dirtok_next(char* buf) {
     }
     uint32_t len = dir_ptr_end - dir_ptr;
     if (len == 0) {
-        // free(dirname_full);
+        free(dirname_full);
         return false;
     }
     strlcpy(buf, dir_ptr, len + 1);

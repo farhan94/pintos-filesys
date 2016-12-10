@@ -238,14 +238,14 @@ thread_create (const char *name, int priority,
   if (thread_current() == initial_thread) {
     // printf("initializing initial thread\n");
     initial_thread->cur_dir = (char*)malloc(sizeof(char) * 2);
-    initial_thread->cur_dir[0] = '/';
-    initial_thread->cur_dir[1] = '\0';
+    // initial_thread->cur_dir[0] = '/';
+    // initial_thread->cur_dir[1] = '\0';
     strlcpy(initial_thread->cur_dir, "/", 2);
     // printf("initial thread's cur_dir is %s\n", initial_thread->cur_dir);
   }
   t->cur_dir = (char*)malloc(sizeof(char) * (strlen(thread_current()->cur_dir) + 1));
   if (!t->cur_dir) {
-    // printf("Malloc failed?????\n");
+    printf("Malloc failed?????\n");
   }
   strlcpy(t->cur_dir, thread_current()->cur_dir, strlen(thread_current()->cur_dir) + 1);
   // printf("thread (thread_create) - new thread's dir is %s\n", t->cur_dir);

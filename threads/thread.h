@@ -118,7 +118,7 @@ struct thread
     struct file *rox_executable;
 
     /* Filesys */
-    char cur_dir[DIRNAME_MAX];
+    char* cur_dir;
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
@@ -139,6 +139,7 @@ struct fd_elem{
     struct list_elem element;
     struct dir* dir;
     bool isdir;
+    bool closed;
 };
 
 

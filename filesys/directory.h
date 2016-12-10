@@ -16,7 +16,7 @@
    After directories are implemented, this maximum length may be
    retained, but much longer full path names must be allowed. */
 #define NAME_MAX 14
-#define DIRNAME_MAX 256
+#define DIRNAME_MAX 512
 
 struct inode;
 struct dir 

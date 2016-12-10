@@ -8,11 +8,12 @@
 #include "filesys/directory.h"
 #include "threads/thread.h"
 
-char dirname_full[DIRNAME_MAX];
-char dirname_cur[NAME_MAX];
+char dirname_full[DIRNAME_MAX + 1];
+char dirname_cur[NAME_MAX + 1];
 char* dir_ptr;
 
 void dirtok_init(char const* dirname) {
+    // dirname_full = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
     strlcpy(dirname_full, dirname, strlen(dirname) + 1);
     // printf("Full dirname: %s\n", dirname_full);
     dir_ptr = dirname_full;
@@ -24,6 +25,7 @@ void dirtok_init(char const* dirname) {
 bool dirtok_next(char* buf) {
     // return false;
     if (*dir_ptr == '\0') {
+        // free(dirname_full);
         return false;
     }
     while (*dir_ptr == '/') {    // skip all consecutive "/"
@@ -35,6 +37,7 @@ bool dirtok_next(char* buf) {
     }
     uint32_t len = dir_ptr_end - dir_ptr;
     if (len == 0) {
+        // free(dirname_full);
         return false;
     }
     strlcpy(buf, dir_ptr, len + 1);
@@ -60,7 +63,7 @@ bool dirtok_hasnext() {
 
 void dirtok_test() {
     dirtok_init("adsaf/btase/cdd//d123/////edfsa/");
-    char dirname[NAME_MAX];
+    char dirname[DIRNAME_MAX + 1];
     while (dirtok_next(dirname)) {
         printf("%s\n", dirname);
     }
@@ -89,10 +92,16 @@ void dirtok_get_abspath_updir(char const* pathname, char* buf) {
 /* Get full pathname of the directory/file. */
 void dirtok_get_abspath(char const* pathname, char* buf) {
     // printf("Getting abspath of %s\n", pathname);
+    // printf("current thread's dir is %s\n", thread_current()->cur_dir);
+    if (strlen(pathname) >= DIRNAME_MAX) {
+        printf("dir-tokenizer (dirtok_get_abspath): overflow on path name %s.\n", pathname);
+        return false;
+    }
     if (*pathname == '/') { // absolute
         strlcpy(buf, pathname, strlen(pathname) + 1);
     }
     else {                        // relative
+        // printf("%d\n", buf);
         strlcpy(buf, thread_current()->cur_dir, strlen(thread_current()->cur_dir) + 1);
         size_t len = strlen(buf);
         // printf("len is %d\n", len);
@@ -104,8 +113,8 @@ void dirtok_get_abspath(char const* pathname, char* buf) {
 
         /* Now concatenate the rest of the pathname. */
         if (strlcat(buf, pathname, strlen(buf) + strlen(pathname) + 1) >= DIRNAME_MAX) {
-            printf("Overflow on path name.\n");
-            exit(-1);
+            printf("dir-tokenizer (dirtok_get_abspath): overflow on path name %s/%s.\n", buf, pathname);
+            return false;
         }
     }
     // printf("Absolute pathname of file/path is %s\n", buf);

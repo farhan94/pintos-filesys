@@ -362,6 +362,7 @@ int open(const char *file) {
     }
     thread_current()->next_file = thread_current()->next_file + 1;
     list_push_back(&thread_current()->fd_list, &fe->element);
+    // printf("success %d??\n", fe->fd);
     return fe->fd;
 }
 
@@ -444,16 +445,29 @@ int tell(int fd) {
     struct fd_elem *fd_elem = get_fd_element(fd);
     if (fd_elem == NULL) {
         return -1;
-    } else {
-        file_tell(fd_elem->file);
     }
-    return -1;
+    return file_tell(fd_elem->file);
+    // else {
+    //     file_tell(fd_elem->file);
+    // }
+    // return -1;
 }
 
 void close(int fd) {
     /* Closes file descriptor fd. Exiting or terminating a process implicitly closes
      all its open file descriptors, as if by calling this function for each one. */
-     
+     struct fd_elem* fd_elem = get_fd_element(fd);
+     if (!fd_elem || fd_elem->closed) {
+         return;
+     }
+     if (fd_elem->isdir) {
+         fd_elem->closed = true;
+         return dir_close(fd_elem->dir);
+     }
+     else {
+         fd_elem->closed = true;
+         return file_close(fd_elem->file);
+     }
 }
 
 void check_bad_ptr(void* arg_ptr) {
@@ -479,14 +493,17 @@ void check_bad_ptr(void* arg_ptr) {
  */
 bool chdir(const char *dirname) {
     // printf("In chdir\n");
-    char path[DIRNAME_MAX];
+    char* path = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
+    // char path[DIRNAME_MAX + 1];
     dirtok_get_abspath(dirname, path);
     struct dir* dir = dir_open_path(path);
     if (dir) {
         strlcpy(thread_current()->cur_dir, path, strlen(path) + 1);
         // printf("Current thread's directory is now %s\n", thread_current()->cur_dir);
+        free(path);
         return true;
     }
+    free(path);
     return false;
     // dirtok_test();
 }

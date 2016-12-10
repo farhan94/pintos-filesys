@@ -19,10 +19,10 @@ test_main (void)
   int i;
 
   msg ("creating many levels of files and directories...");
-  quiet = true;
+  quiet = false;
   CHECK (mkdir ("start"), "mkdir \"start\"");
   CHECK (chdir ("start"), "chdir \"start\"");
-  for (i = 0; ; i++) 
+  for (i = 0; i < 10; i++) 
     {
       char name[3][READDIR_MAX_LEN + 1];
       char file_name[16], dir_name[16];

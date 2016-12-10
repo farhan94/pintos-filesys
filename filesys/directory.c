@@ -73,16 +73,22 @@ struct dir*
 dir_open_path(char const* pathname) {
   struct dir* cur_dir = dir_open_root();
   struct inode* cur_inode;
-  char dirname[DIRNAME_MAX];
+  // char* dirname = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
+  char dirname[NAME_MAX + 1];
   dirtok_init(pathname);
   while (dirtok_next(dirname)) {
     // printf("Opening next directory: %s\n", dirname);
     if (dir_lookup(cur_dir, dirname, &cur_inode)) {
       // printf("Directory successfully opened: %s\n", dirname);
       cur_dir = dir_open(cur_inode);
+      if (!cur_dir) {
+        // printf("directory (dir_open_path): failed to open directory %s\n", dirname);
+        inode_close(cur_inode);
+        return NULL;
+      }
     }
     else {
-      // printf("uh oh\n");
+      // printf("directory (dir_open_path): dir does not exist.\n");
       inode_close(cur_inode);
       return NULL;
     }
@@ -257,7 +263,7 @@ dir_remove (struct dir *dir, const char *name)
  done:
   /* Check if dir is not empty */
   dir = dir_open(inode);
-  char buf[NAME_MAX];
+  char buf[NAME_MAX + 1];
   while (dir_readdir(dir, buf)) {
     if (strcmp(".", buf) == 0 || strcmp("..", buf) == 0) {
       // printf("found link . or ..\n");

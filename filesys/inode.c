@@ -313,9 +313,8 @@ inode_close (struct inode *inode)
       if (inode->removed) 
         {
           free_map_release (inode->sector, 1);
-      //    inode_dealloc(inode);
-          //free_map_release (inode->data.start,
-          //                  bytes_to_sectors (inode->data.length)); 
+          // inode_dealloc(inode);
+          // free_map_release (inode->data, bytes_to_sectors (inode->data.length)); 
         }
 
       free (inode); 

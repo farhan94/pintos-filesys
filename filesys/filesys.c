@@ -47,18 +47,32 @@ filesys_done (void)
 bool
 filesys_create (const char *name, off_t initial_size, bool is_dir) 
 {
-  // printf("creating file/dir %s\n", name);
-  if (strlen(name) > NAME_MAX) {
-    return false;
+  dirtok_init(name);
+  char name_check[DIRNAME_MAX];
+  while (dirtok_next(name_check)) {
+    if (strlen(name_check) > NAME_MAX) {
+      return false;
+    }
   }
+  // printf("filesys (filesys_create): creating file/dir %s\n", name);
   block_sector_t inode_sector = 0;
   /* Check if name is absolute or relative */
-  char path[DIRNAME_MAX];
+  // char* path = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
+  char path[DIRNAME_MAX + 1];
   dirtok_get_abspath_updir(name, path);
   struct dir* dir = dir_open_path(path);
+  if (!dir) {
+    // free(path);
+    return false;
+  }
 
-  char filename[NAME_MAX];
+  char filename[NAME_MAX + 1];
   dirtok_get_filename(name, filename);
+
+  if (strlen(filename) > NAME_MAX) {
+    // free(path);
+    return false;
+  }
 
   bool success;
   if (is_dir) {
@@ -88,8 +102,14 @@ filesys_create (const char *name, off_t initial_size, bool is_dir)
   dir_close (dir);
 
   if (success) {
-    // printf("Successfully created file/dir %s\n", name);
+    if (is_dir) {
+      // printf("filesys (filesys_create) - successfully created dir %s\n", path);
+    }
+    else {
+      // printf("filesys (filesys_create) - successfully created file %s%s\n", path, filename);
+    }
   }
+  // free(path);
   return success;
 }
 
@@ -106,13 +126,14 @@ filesys_open (const char *name)
     return file_open(dir->inode);
   }
   //printf("\n\n\n@@@HERE\n\n\n");
-  char path[DIRNAME_MAX];
+  // char* path = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
+  char path[DIRNAME_MAX + 1];
   dirtok_get_abspath_updir(name, path);
   // printf("opening file/dir %s\n", path);
   struct dir *dir = dir_open_path(path);
   struct inode *inode = NULL;
 
-  char filename[NAME_MAX];
+  char filename[NAME_MAX + 1];
   dirtok_get_filename(name, filename);
 
   bool success;
@@ -123,6 +144,7 @@ filesys_open (const char *name)
   // printf("Dir lookup succeeded in open: %d\n", success);
   dir_close (dir);
 
+  // free(path);
   return file_open (inode);
 }
 
@@ -132,30 +154,36 @@ filesys_open_inode(char const* name) {
     struct dir* dir = dir_open_root();
     return dir->inode;
   }
-  //printf("\n\n\n@@@HERE\n\n\n");
-  char path[DIRNAME_MAX];
+  // char* path = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
+  char path[DIRNAME_MAX + 1];
   dirtok_get_abspath_updir(name, path);
+  // printf("path is %s\n", path);
   struct dir* dir = dir_open_path(path);
+  // printf("path is now %s\n", path);
   if (!dir) {
     // printf("filesys (filesys_open_inode): parent dir does not exist.\n");
+    // free(path);
     return NULL;
   }
 
   struct inode* inode = NULL;
 
-  char filename[NAME_MAX];
+  char filename[NAME_MAX + 1];
   dirtok_get_filename(name, filename);
 
+  // printf("the path is %s\n", path - 1);
   // printf("filesys (filesys_open_inode): opening file/dir %s from dir %s\n", filename, path);
 
-  if (dir_lookup(dir, filename, &inode)) {
-    // printf("filesys (filesys_open_inode): found file to open\n");
+  if (!dir_lookup(dir, filename, &inode)) {
+    // printf("filesys (filesys_open_inode): failed to find the file: %s in the directory %s\n", filename, path);
     dir_close(dir);
-    return inode;
+    // free(path);
+    return NULL;
   }
 
   dir_close(dir);
-  return NULL;
+  // free(path);
+  return inode;
 }
 
 /* Deletes the file named NAME.
@@ -165,10 +193,12 @@ filesys_open_inode(char const* name) {
 bool
 filesys_remove (const char *name) 
 {
-  char path[DIRNAME_MAX];
+  // char* path = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
+  char path[DIRNAME_MAX + 1];
   dirtok_get_abspath(name, path);
   if (*path == '/' && *(path + 1) == '\0') { // can't remove root directory'
     // printf("can't remove root\n'");
+    // free(path);
     return false;
   }
   dirtok_get_abspath_updir(name, path);
@@ -177,15 +207,18 @@ filesys_remove (const char *name)
  
   if (!dir) {
     // printf("filesys (filesys_remove): dir does not exist.\n");
+    // free(path);
     return false;
   }
 
-  char filename[NAME_MAX];
+  char filename[NAME_MAX + 1];
   dirtok_get_filename(name, filename);
   // printf("Removing %s from %s\n", filename, path);
 
   bool success = dir != NULL && dir_remove (dir, filename);
   dir_close (dir); 
+  // free(path);
+  // printf("done removing\n");
   return success;
 }
 

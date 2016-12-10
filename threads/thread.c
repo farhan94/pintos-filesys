@@ -99,12 +99,14 @@ thread_init (void)
   init_thread (initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
-  strlcpy(initial_thread->cur_dir, "/", sizeof("/"));
 
   // our fields
   sema_init(&initial_thread->child_loaded, 0);
   sema_init(&initial_thread->done, 0);
   sema_init(&initial_thread->parent_ready, 0);
+
+  // initial_thread->cur_dir = (char*)malloc(sizeof(char) * 2);
+  // strlcpy(initial_thread->cur_dir, "/", 2);
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -233,7 +235,20 @@ thread_create (const char *name, int priority,
   list_push_back(&thread_current()->children, &t->child_elem);
 
   /* Inherit dirname from current thread */
-  strlcpy(t->cur_dir, thread_current()->cur_dir, sizeof(t->cur_dir));
+  if (thread_current() == initial_thread) {
+    // printf("initializing initial thread\n");
+    initial_thread->cur_dir = (char*)malloc(sizeof(char) * 2);
+    initial_thread->cur_dir[0] = '/';
+    initial_thread->cur_dir[1] = '\0';
+    strlcpy(initial_thread->cur_dir, "/", 2);
+    // printf("initial thread's cur_dir is %s\n", initial_thread->cur_dir);
+  }
+  t->cur_dir = (char*)malloc(sizeof(char) * (strlen(thread_current()->cur_dir) + 1));
+  if (!t->cur_dir) {
+    // printf("Malloc failed?????\n");
+  }
+  strlcpy(t->cur_dir, thread_current()->cur_dir, strlen(thread_current()->cur_dir) + 1);
+  // printf("thread (thread_create) - new thread's dir is %s\n", t->cur_dir);
 
   /* Add to run queue. */
   thread_unblock (t);
@@ -330,6 +345,7 @@ thread_exit (int status)
   // printf("%s being removed...\n", thread_current()->name);
   list_remove (&thread_current()->allelem);
   list_remove(&thread_current()->child_elem);
+  free(thread_current()->cur_dir);
   thread_current ()->status = THREAD_DYING;
   schedule ();
   NOT_REACHED ();

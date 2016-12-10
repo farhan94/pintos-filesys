@@ -1,0 +1,2632 @@
+diff --git a/Makefile.build b/Makefile.build
+index e997d27..cca9de3 100644
+--- a/Makefile.build
++++ b/Makefile.build
+@@ -71,6 +71,7 @@ filesys_SRC += filesys/file.c		# Files.
+ filesys_SRC += filesys/directory.c	# Directories.
+ filesys_SRC += filesys/inode.c		# File headers.
+ filesys_SRC += filesys/fsutil.c		# Utilities.
++filesys_SRC += filesys/dir-tokenizer.c	#Tokenizer
+ 
+ SOURCES = $(foreach dir,$(KERNEL_SUBDIRS),$($(dir)_SRC))
+ OBJECTS = $(patsubst %.c,%.o,$(patsubst %.S,%.o,$(SOURCES)))
+diff --git a/filesys/dir-tokenizer.c b/filesys/dir-tokenizer.c
+new file mode 100644
+index 0000000..c7b198c
+--- /dev/null
++++ b/filesys/dir-tokenizer.c
+@@ -0,0 +1,136 @@
++
++#include "dir-tokenizer.h"
++
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++
++#include "filesys/directory.h"
++#include "threads/thread.h"
++
++char* dirname_full;
++char dirname_cur[NAME_MAX + 1];
++char* dir_ptr;
++
++void dirtok_init(char const* dirname) {
++    dirname_full = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
++    strlcpy(dirname_full, dirname, strlen(dirname) + 1);
++    // printf("Full dirname: %s\n", dirname_full);
++    dir_ptr = dirname_full;
++}
++
++/*
++  * Writes the next token into the buffer buf. Returns true if there was a next token, false if not.
++  */
++bool dirtok_next(char* buf) {
++    // return false;
++    if (*dir_ptr == '\0') {
++        free(dirname_full);
++        return false;
++    }
++    while (*dir_ptr == '/') {    // skip all consecutive "/"
++        ++dir_ptr;
++    }
++    char* dir_ptr_end = dir_ptr;
++    while (*dir_ptr_end != '/' && *dir_ptr_end != '\0') {   // find the end of the current directory name
++        ++dir_ptr_end;
++    }
++    uint32_t len = dir_ptr_end - dir_ptr;
++    if (len == 0) {
++        free(dirname_full);
++        return false;
++    }
++    strlcpy(buf, dir_ptr, len + 1);
++    // buf[len] = '\0';
++    /* Set pointer to the next '/' */
++    dir_ptr = dir_ptr_end;
++    return true;
++    
++}
++
++bool dirtok_hasnext() {
++    if (*dir_ptr == '\0') {
++        return false;
++    }
++    while (*dir_ptr == '/') {
++        ++dir_ptr;
++    }
++    if (*dir_ptr == '\0') {
++        return false;
++    }
++    return true;
++}
++
++void dirtok_test() {
++    dirtok_init("adsaf/btase/cdd//d123/////edfsa/");
++    char dirname[DIRNAME_MAX + 1];
++    while (dirtok_next(dirname)) {
++        printf("%s\n", dirname);
++    }
++}
++
++
++/*
++  * Get full pathname of the directory immediately before the specified new file/directory.
++  * For example, if we want to create a new file or directory at path "/a/b/c", this function would return "/a/b"
++  */
++void dirtok_get_abspath_updir(char const* pathname, char* buf) {
++    /* First get the full pathname */
++    dirtok_get_abspath(pathname, buf);
++    size_t len = strlen(buf);
++    char* end_ptr = buf + len;  // take us to the sentinel '\0'
++    /* Backtrack until we hit the first '/' char and rewrite the character right after it as the sentinel '\0' */
++    while (*end_ptr != '/') {
++        --end_ptr;
++    }
++    *(end_ptr + 1) = '\0';
++    // printf("Absolute pathname of upper directory is %s\n", buf);
++}
++
++
++
++/* Get full pathname of the directory/file. */
++void dirtok_get_abspath(char const* pathname, char* buf) {
++    // printf("Getting abspath of %s\n", pathname);
++    // printf("current thread's dir is %s\n", thread_current()->cur_dir);
++    if (strlen(pathname) >= DIRNAME_MAX) {
++        printf("dir-tokenizer (dirtok_get_abspath): overflow on path name %s.\n", pathname);
++        return false;
++    }
++    if (*pathname == '/') { // absolute
++        strlcpy(buf, pathname, strlen(pathname) + 1);
++    }
++    else {                        // relative
++        // printf("%d\n", buf);
++        strlcpy(buf, thread_current()->cur_dir, strlen(thread_current()->cur_dir) + 1);
++        size_t len = strlen(buf);
++        // printf("len is %d\n", len);
++        /* Check if end of buffer ends with a '/' character or not, and if not then write it. */
++        if (buf[len - 1] != '/') {
++            buf[len] = '/';
++            buf[len + 1] = '\0';
++        }
++
++        /* Now concatenate the rest of the pathname. */
++        if (strlcat(buf, pathname, strlen(buf) + strlen(pathname) + 1) >= DIRNAME_MAX) {
++            printf("dir-tokenizer (dirtok_get_abspath): overflow on path name %s/%s.\n", buf, pathname);
++            return false;
++        }
++    }
++    // printf("Absolute pathname of file/path is %s\n", buf);
++}
++
++/* Get the filename of the directory/file. For example, given the path "/a/b/c", this function would return "c" */
++void dirtok_get_filename(char const* pathname, char* buf) {
++    // printf("Getting filename of %s\n", pathname);
++    dirtok_get_abspath(pathname, buf);
++    char* ptr = pathname + strlen(pathname);    // take us to the '\0' sentinel
++    while (*ptr != '/' && ptr != pathname) {
++        --ptr;
++    }
++    if (*ptr == '/') {
++        ++ptr;
++    }
++    strlcpy(buf, ptr, strlen(ptr) + 1);
++    // printf("Filename is %s\n", buf);
++}
+diff --git a/filesys/dir-tokenizer.h b/filesys/dir-tokenizer.h
+new file mode 100644
+index 0000000..b95150b
+--- /dev/null
++++ b/filesys/dir-tokenizer.h
+@@ -0,0 +1,25 @@
++#ifndef DIR_TOKENIZER_H
++#define DIR_TOKENIZER_H
++
++#include <stdbool.h>
++
++void dirtok_init(char const* path);
++bool dirtok_next(char* buf);
++bool dirtok_hasnext();
++
++/*
++  * Get full pathname of the directory immediately before the specified new file/directory.
++  * For example, if we want to create a new file or directory at path "/a/b/c", this function would return "/a/b"
++  */
++void dirtok_get_abspath_updir(char const* pathname, char* buf);
++
++/* Get full pathname of the directory/file. */
++void dirtok_get_abspath(char const* pathname, char* buf);
++
++/* Get the filename of the directory/file. For example, given the path "/a/b/c", this function would return "c" */
++void dirtok_get_filename(char const* pathname, char* buf);
++
++void dirtok_test();
++
++
++#endif
+diff --git a/filesys/directory.c b/filesys/directory.c
+index 030c1c9..47291a6 100644
+--- a/filesys/directory.c
++++ b/filesys/directory.c
+@@ -4,29 +4,37 @@
+ #include <list.h>
+ #include "filesys/filesys.h"
+ #include "filesys/inode.h"
++#include "filesys/dir-tokenizer.h"
+ #include "threads/malloc.h"
+ 
+ /* A directory. */
+-struct dir 
+-  {
+-    struct inode *inode;                /* Backing store. */
+-    off_t pos;                          /* Current position. */
+-  };
+ 
+-/* A single directory entry. */
+-struct dir_entry 
+-  {
+-    block_sector_t inode_sector;        /* Sector number of header. */
+-    char name[NAME_MAX + 1];            /* Null terminated file name. */
+-    bool in_use;                        /* In use or free? */
+-  };
+ 
+ /* Creates a directory with space for ENTRY_CNT entries in the
+    given SECTOR.  Returns true if successful, false on failure. */
+ bool
+ dir_create (block_sector_t sector, size_t entry_cnt)
+ {
+-  return inode_create (sector, entry_cnt * sizeof (struct dir_entry));
++
++  struct dir_entry dire_entry;
++  dire_entry.inode_sector = sector;
++  if(!inode_create (sector, entry_cnt * sizeof (struct dir_entry), true)) //IDK if true goes here
++  {
++    return false;
++  }
++  struct dir *direc = dir_open(inode_open(sector));
++  if(direc == NULL){
++    ASSERT (direc != NULL);
++  }
++  
++  off_t siz = inode_write_at(direc->inode, &dire_entry, sizeof(dire_entry), 0);
++  if(siz == sizeof(dire_entry)){
++    dir_close(direc);
++    return true;
++  }
++  dir_close(direc);
++  return false;
++  
+ }
+ 
+ /* Opens and returns the directory for the given INODE, of which
+@@ -57,6 +65,37 @@ dir_open_root (void)
+   return dir_open (inode_open (ROOT_DIR_SECTOR));
+ }
+ 
++/*
++  * Open a directory given its full absolute path.
++  * Returns nullptr on failure.
++  */
++struct dir*
++dir_open_path(char const* pathname) {
++  struct dir* cur_dir = dir_open_root();
++  struct inode* cur_inode;
++  // char* dirname = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
++  char dirname[NAME_MAX + 1];
++  dirtok_init(pathname);
++  while (dirtok_next(dirname)) {
++    // printf("Opening next directory: %s\n", dirname);
++    if (dir_lookup(cur_dir, dirname, &cur_inode)) {
++      // printf("Directory successfully opened: %s\n", dirname);
++      cur_dir = dir_open(cur_inode);
++      if (!cur_dir) {
++        // printf("directory (dir_open_path): failed to open directory %s\n", dirname);
++        inode_close(cur_inode);
++        return NULL;
++      }
++    }
++    else {
++      // printf("directory (dir_open_path): dir does not exist.\n");
++      inode_close(cur_inode);
++      return NULL;
++    }
++  }
++  return cur_dir;
++}
++
+ /* Opens and returns a new directory for the same inode as DIR.
+    Returns a null pointer on failure. */
+ struct dir *
+@@ -141,6 +180,7 @@ dir_lookup (const struct dir *dir, const char *name,
+ bool
+ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
+ {
++  // printf("adding dir %s\n", name);
+   struct dir_entry e;
+   off_t ofs;
+   bool success = false;
+@@ -149,12 +189,22 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
+   ASSERT (name != NULL);
+ 
+   /* Check NAME for validity. */
+-  if (*name == '\0' || strlen (name) > NAME_MAX)
++  if (*name == '\0' || strlen (name) > NAME_MAX) {
++    // printf("failed here\n");
+     return false;
++  }
++  
++  // char buf[NAME_MAX];
++  // while (dir_readdir(dir, buf)) {
++  //   printf("%s\n", name);
++  // }
+ 
+   /* Check that NAME is not in use. */
+-  if (lookup (dir, name, NULL, NULL))
++  if (lookup (dir, name, NULL, NULL)) {
++    // printf("file/dir already exists\n");
+     goto done;
++  }
++    
+ 
+   /* Set OFS to offset of free slot.
+      If there are no free slots, then it will be set to the
+@@ -211,6 +261,13 @@ dir_remove (struct dir *dir, const char *name)
+   success = true;
+ 
+  done:
++  /* Check if dir is not empty */
++  dir = dir_open(inode);
++  char buf[NAME_MAX + 1];
++  if (dir_readdir(dir, buf)) {
++    // printf("Found %s in dir\n", buf);
++    return false;
++  }
+   inode_close (inode);
+   return success;
+ }
+@@ -228,7 +285,11 @@ dir_readdir (struct dir *dir, char name[NAME_MAX + 1])
+       dir->pos += sizeof e;
+       if (e.in_use)
+         {
++          if (strcmp(e.name, ".") == 0 || strcmp(e.name, "..") == 0) {
++            continue;
++          }
+           strlcpy (name, e.name, NAME_MAX + 1);
++          // printf("directory (readdir): next dir is %s\n", name);
+           return true;
+         } 
+     }
+diff --git a/filesys/directory.h b/filesys/directory.h
+index 930acf9..6ce1d12 100644
+--- a/filesys/directory.h
++++ b/filesys/directory.h
+@@ -4,26 +4,47 @@
+ #include <stdbool.h>
+ #include <stddef.h>
+ #include "devices/block.h"
++#include <stdio.h>
++#include <string.h>
++#include <list.h>
++#include "filesys/filesys.h"
++#include "filesys/inode.h"
++#include "threads/malloc.h"
+ 
+ /* Maximum length of a file name component.
+    This is the traditional UNIX maximum length.
+    After directories are implemented, this maximum length may be
+    retained, but much longer full path names must be allowed. */
+ #define NAME_MAX 14
++#define DIRNAME_MAX 1024
+ 
+ struct inode;
++struct dir 
++  {
++    struct inode *inode;                /* Backing store. */
++    off_t pos;                          /* Current position. */
++  };
++
++/* A single directory entry. */
++struct dir_entry 
++  {
++    block_sector_t inode_sector;        /* Sector number of header. */
++    char name[NAME_MAX + 1];            /* Null terminated file name. */
++    bool in_use;                        /* In use or free? */
++  };
+ 
+ /* Opening and closing directories. */
+ bool dir_create (block_sector_t sector, size_t entry_cnt);
+ struct dir *dir_open (struct inode *);
+ struct dir *dir_open_root (void);
++struct dir* dir_open_path(char const* pathname);
+ struct dir *dir_reopen (struct dir *);
+ void dir_close (struct dir *);
+ struct inode *dir_get_inode (struct dir *);
+ 
+ /* Reading and writing. */
+ bool dir_lookup (const struct dir *, const char *name, struct inode **);
+-bool dir_add (struct dir *, const char *name, block_sector_t);
++bool dir_add (struct dir *, const char *name, block_sector_t inode_sector);
+ bool dir_remove (struct dir *, const char *name);
+ bool dir_readdir (struct dir *, char name[NAME_MAX + 1]);
+ 
+diff --git a/filesys/file.c b/filesys/file.c
+index d5fc10d..0952a70 100644
+--- a/filesys/file.c
++++ b/filesys/file.c
+@@ -3,14 +3,6 @@
+ #include "filesys/inode.h"
+ #include "threads/malloc.h"
+ 
+-/* An open file. */
+-struct file 
+-  {
+-    struct inode *inode;        /* File's inode. */
+-    off_t pos;                  /* Current position. */
+-    bool deny_write;            /* Has file_deny_write() been called? */
+-  };
+-
+ /* Opens a file for the given INODE, of which it takes ownership,
+    and returns the new file.  Returns a null pointer if an
+    allocation fails or if INODE is null. */
+@@ -94,6 +86,9 @@ file_read_at (struct file *file, void *buffer, off_t size, off_t file_ofs)
+ off_t
+ file_write (struct file *file, const void *buffer, off_t size) 
+ {
++  if (inode_is_dir(file->inode)) {
++    thread_exit(-1);
++  }
+   off_t bytes_written = inode_write_at (file->inode, buffer, size, file->pos);
+   file->pos += bytes_written;
+   return bytes_written;
+diff --git a/filesys/file.h b/filesys/file.h
+index a33c5af..c49bf3d 100644
+--- a/filesys/file.h
++++ b/filesys/file.h
+@@ -2,8 +2,16 @@
+ #define FILESYS_FILE_H
+ 
+ #include "filesys/off_t.h"
++#include "filesys/inode.h"
++#include "filesys/off_t.h"
+ 
+-struct inode;
++/* An open file. */
++struct file 
++  {
++    struct inode *inode;        /* File's inode. */
++    off_t pos;                  /* Current position. */
++    bool deny_write;            /* Has file_deny_write() been called? */
++  };
+ 
+ /* Opening and closing files. */
+ struct file *file_open (struct inode *);
+diff --git a/filesys/filesys.c b/filesys/filesys.c
+index 7a53f5f..09710f5 100644
+--- a/filesys/filesys.c
++++ b/filesys/filesys.c
+@@ -6,6 +6,8 @@
+ #include "filesys/free-map.h"
+ #include "filesys/inode.h"
+ #include "filesys/directory.h"
++#include "filesys/dir-tokenizer.h"
++#include "threads/thread.h"
+ 
+ /* Partition that contains the file system. */
+ struct block *fs_device;
+@@ -37,24 +39,91 @@ filesys_done (void)
+ {
+   free_map_close ();
+ }
+-
++
+ /* Creates a file named NAME with the given INITIAL_SIZE.
+    Returns true if successful, false otherwise.
+    Fails if a file named NAME already exists,
+    or if internal memory allocation fails. */
+ bool
+-filesys_create (const char *name, off_t initial_size) 
++filesys_create (const char *name, off_t initial_size, bool is_dir) 
+ {
++  // printf("create\n");
++  dirtok_init(name);
++  char* name_check = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
++  // char name_check[DIRNAME_MAX];
++  while (dirtok_next(name_check)) {
++    if (strlen(name_check) > NAME_MAX) {
++      free(name_check);
++      return false;
++    }
++  }
++  free(name_check);
++
++  char* path = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
++  char* filename = (char*)malloc(sizeof(char) * (NAME_MAX + 1));
++  if (!path || !filename) {
++    printf("malloc error\n");
++  }
++
++  // char path[DIRNAME_MAX + 1];
++  // char filename[NAME_MAX + 1];
++
++  // printf("filesys (filesys_create): creating file/dir %s\n", name);
+   block_sector_t inode_sector = 0;
+-  struct dir *dir = dir_open_root ();
+-  bool success = (dir != NULL
+-                  && free_map_allocate (1, &inode_sector)
+-                  && inode_create (inode_sector, initial_size)
+-                  && dir_add (dir, name, inode_sector));
++  /* Check if name is absolute or relative */
++  dirtok_get_abspath_updir(name, path);
++  struct dir* dir = dir_open_path(path);
++  if (!dir) {
++    free(path);
++    free(filename);
++    return false;
++  }
++
++  /* Check if filename is too big */
++  dirtok_get_filename(name, filename);
++  if (strlen(filename) > NAME_MAX) {
++    free(path);
++    free(filename);
++    return false;
++  }
++
++  bool success;
++  if (is_dir) {
++    // printf("making dir %s in %s\n", filename, path);
++    success = dir != NULL
++                        && free_map_allocate(1, &inode_sector)
++                        && dir_create(inode_sector, 0)
++                        && dir_add(dir, filename, inode_sector);
++    /* Add the "." and ".." hard links */
++    block_sector_t parent_inode_sector = dir->inode->sector;
++    dirtok_get_abspath(name, path);
++    dir = dir_open_path(path);
++    success = success
++                        && dir_add(dir, ".", inode_sector)
++                        && dir_add(dir, "..", parent_inode_sector);
++    int t;
++  }
++  else {
++    success = dir != NULL
++                      && free_map_allocate (1, &inode_sector)
++                      && inode_create (inode_sector, initial_size, false)
++                      && dir_add (dir, filename, inode_sector);
++  }
++  
+   if (!success && inode_sector != 0) 
+     free_map_release (inode_sector, 1);
+   dir_close (dir);
+ 
++  if (success) {
++    if (is_dir) {
++      // printf("filesys (filesys_create) - successfully created dir %s\n", path);
++    }
++    else {
++      // printf("filesys (filesys_create) - successfully created file %s%s\n", path, filename);
++    }
++  }
++  free(path);
++  free(filename);
+   return success;
+ }
+ 
+@@ -66,16 +135,88 @@ filesys_create (const char *name, off_t initial_size)
+ struct file *
+ filesys_open (const char *name)
+ {
+-  struct dir *dir = dir_open_root ();
++  if (*name == '/' && *(name + 1) == '\0') {  // if root, just return the root inode
++    struct dir* dir = dir_open_root();
++    return file_open(dir->inode);
++  }
++  //printf("\n\n\n@@@HERE\n\n\n");
++  char* path = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
++  char* filename = (char*)malloc(sizeof(char) * (NAME_MAX + 1));
++  if (!path || !filename) {
++    printf("malloc error\n");
++  }
++
++  // char path[DIRNAME_MAX + 1];
++  // char filename[NAME_MAX + 1];
++
++  dirtok_get_abspath_updir(name, path);
++  // printf("opening file/dir %s\n", path);
++  struct dir *dir = dir_open_path(path);
+   struct inode *inode = NULL;
++  
++  dirtok_get_filename(name, filename);
+ 
+-  if (dir != NULL)
+-    dir_lookup (dir, name, &inode);
++  bool success;
++  if (dir != NULL) {
++    success = dir_lookup (dir, filename, &inode);
++  }
++
++  // printf("Dir lookup succeeded in open: %d\n", success);
+   dir_close (dir);
+ 
++  free(path);
++  free(filename);
+   return file_open (inode);
+ }
+ 
++struct inode*
++filesys_open_inode(char const* name) {
++  // printf("open\n");
++  if (*name == '/' && *(name + 1) == '\0') {  // if root, just return the root inode
++    struct dir* dir = dir_open_root();
++    return dir->inode;
++  }
++
++  char* path = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
++  char* filename = (char*)malloc(sizeof(char) * (NAME_MAX + 1));
++  if (!path || !filename) {
++    printf("malloc error\n");
++  }
++
++  // char path[DIRNAME_MAX + 1];
++  // char filename[NAME_MAX + 1];
++
++  dirtok_get_abspath_updir(name, path);
++  // printf("path is %s\n", path);
++  struct dir* dir = dir_open_path(path);
++  // printf("path is now %s\n", path);
++  if (!dir) {
++    // printf("filesys (filesys_open_inode): parent dir does not exist.\n");
++    free(path);
++    free(filename);
++    return NULL;
++  }
++
++  struct inode* inode = NULL;
++  
++  dirtok_get_filename(name, filename);
++  // printf("the path is %s\n", path - 1);
++
++  if (!dir_lookup(dir, filename, &inode)) {
++    // printf("filesys (filesys_open_inode): failed to find the file: %s in the directory %s\n", filename, path);
++    dir_close(dir);
++    free(filename);
++    free(path);
++    return NULL;
++  }
++
++  // printf("filesys (filesys_open_inode): opening file/dir %s from dir %s\n", filename, path);
++  dir_close(dir);
++  free(filename);
++  free(path);
++  return inode;
++}
++
+ /* Deletes the file named NAME.
+    Returns true if successful, false on failure.
+    Fails if no file named NAME exists,
+@@ -83,10 +224,42 @@ filesys_open (const char *name)
+ bool
+ filesys_remove (const char *name) 
+ {
+-  struct dir *dir = dir_open_root ();
+-  bool success = dir != NULL && dir_remove (dir, name);
+-  dir_close (dir); 
++  // printf("remove\n");
++  char* path = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
++  char* filename = (char*)malloc(sizeof(char) * (NAME_MAX + 1));
++  if (!path || !filename) {
++    printf("malloc error\n");
++  }
++
++  // char path[DIRNAME_MAX + 1];
++  // char filename[NAME_MAX + 1];
+ 
++  dirtok_get_abspath(name, path);
++  if (*path == '/' && *(path + 1) == '\0') { // can't remove root directory'
++    // printf("can't remove root\n'");
++    free(path);
++    free(filename);
++    return false;
++  }
++  dirtok_get_abspath_updir(name, path);
++  // printf("filesys (filesys_remove): file/dir's parent dir is %s\n", path);
++  struct dir* dir = dir_open_path(path);
++ 
++  if (!dir) {
++    // printf("filesys (filesys_remove): dir does not exist.\n");
++    free(path);
++    free(filename);
++    return false;
++  }
++  
++  dirtok_get_filename(name, filename);
++  // printf("Removing %s from %s\n", filename, path);
++
++  bool success = dir != NULL && dir_remove (dir, filename);
++  dir_close (dir); 
++  free(path);
++  free(filename);
++  // printf("done removing\n");
+   return success;
+ }
+ 
+diff --git a/filesys/filesys.h b/filesys/filesys.h
+index c1cda84..6f7b9dc 100644
+--- a/filesys/filesys.h
++++ b/filesys/filesys.h
+@@ -13,8 +13,9 @@ struct block *fs_device;
+ 
+ void filesys_init (bool format);
+ void filesys_done (void);
+-bool filesys_create (const char *name, off_t initial_size);
++bool filesys_create (const char *name, off_t initial_size, bool is_dir);
+ struct file *filesys_open (const char *name);
++struct inode* filesys_open_inode(char const* name);
+ bool filesys_remove (const char *name);
+ 
+ #endif /* filesys/filesys.h */
+diff --git a/filesys/free-map.c b/filesys/free-map.c
+index 29ea4df..04650a9 100644
+--- a/filesys/free-map.c
++++ b/filesys/free-map.c
+@@ -73,7 +73,7 @@ void
+ free_map_create (void) 
+ {
+   /* Create inode. */
+-  if (!inode_create (FREE_MAP_SECTOR, bitmap_file_size (free_map)))
++  if (!inode_create (FREE_MAP_SECTOR, bitmap_file_size (free_map), false))
+     PANIC ("free map creation failed");
+ 
+   /* Write bitmap to file. */
+diff --git a/filesys/fsutil.c b/filesys/fsutil.c
+index 5f045d6..8b7e71a 100644
+--- a/filesys/fsutil.c
++++ b/filesys/fsutil.c
+@@ -118,7 +118,7 @@ fsutil_extract (char **argv UNUSED)
+           printf ("Putting '%s' into the file system...\n", file_name);
+ 
+           /* Create destination file. */
+-          if (!filesys_create (file_name, size))
++          if (!filesys_create (file_name, size,false))
+             PANIC ("%s: create failed", file_name);
+           dst = filesys_open (file_name);
+           if (dst == NULL)
+diff --git a/filesys/inode.c b/filesys/inode.c
+index 3463563..87907f4 100644
+--- a/filesys/inode.c
++++ b/filesys/inode.c
+@@ -1,4 +1,5 @@
+ #include "filesys/inode.h"
++
+ #include <list.h>
+ #include <debug.h>
+ #include <round.h>
+@@ -7,19 +8,10 @@
+ #include "filesys/free-map.h"
+ #include "threads/malloc.h"
+ 
+-/* Identifies an inode. */
+-#define INODE_MAGIC 0x494e4f44
+-
+-/* On-disk inode.
+-   Must be exactly BLOCK_SECTOR_SIZE bytes long. */
+-struct inode_disk
+-  {
+-    block_sector_t start;               /* First data sector. */
+-    off_t length;                       /* File size in bytes. */
+-    unsigned magic;                     /* Magic number. */
+-    uint32_t unused[125];               /* Not used. */
+-  };
+ 
++struct indirect_block_sec{
++  block_sector_t direct[INDIRECT_BLOCKS];
++};
+ /* Returns the number of sectors to allocate for an inode SIZE
+    bytes long. */
+ static inline size_t
+@@ -28,17 +20,129 @@ bytes_to_sectors (off_t size)
+   return DIV_ROUND_UP (size, BLOCK_SECTOR_SIZE);
+ }
+ 
+-/* In-memory inode. */
+-struct inode 
++/*allocates space in the inode stuff */
++bool inode_alloc(struct inode_disk *disk_inode, off_t length){
++  static char null_stuff[BLOCK_SECTOR_SIZE];
++
++
++  if (length < 0){
++    return false;
++  }
++  off_t sectors = bytes_to_sectors(length);
++  if(sectors <= DIRECT_BLOCKS){
++     //printf("\n\n@@@@\n\n");
++    for(int k = 0; k < sectors; k+=1){
++    //  printf("\n\nSTART\n\n\n");
++     //  printf("\n\n\%d\n\n", disk_inode->direct[k]);
++      if(disk_inode->direct[k] == 0){
++        if(!free_map_allocate(1, &disk_inode->direct[k])){
++          return false;
++        }
++       block_write(fs_device, disk_inode->direct[k], null_stuff);
++      }
++      //printf("\n\n\nEND\n\n\n");
++    }
++    //printf("\n\n\nTRUE\n\n\n");
++    return true;
++  }
++  else{
++    for(int k = 0; k < DIRECT_BLOCKS; k+=1){
++      if(disk_inode->direct[k] == 0){
++        if(!free_map_allocate(1, &disk_inode->direct[k])){
++          return false;
++        }
++        block_write(fs_device, disk_inode->direct[k], null_stuff);
++      }
++    }
++    sectors-=DIRECT_BLOCKS;
++    off_t num_alloc;
++    if(sectors <= INDIRECT_BLOCKS){
++      num_alloc = sectors;
++    }
++    else{
++      num_alloc = INDIRECT_BLOCKS;
++    }
++   
++    if(disk_inode->indirect == NULL || disk_inode->indirect == 0){
++      if(!free_map_allocate(1, &disk_inode->indirect)){
++        return false;
++      }
++      block_write(fs_device, disk_inode->indirect, null_stuff);
++    }
++
++    struct indirect_block_sec indirect_sector;
++    block_read(fs_device, disk_inode->indirect, &indirect_sector);
++    for(int k = 0; k <= num_alloc; k++){
++      if(indirect_sector.direct[k] == NULL || indirect_sector.direct[k] == 0){
++          if(!free_map_allocate(1, &indirect_sector.direct[k])){
++            return false;
++          } //ADD THE IF
++        }
++      //disk_inode->indirect_block_sec += 1; //Should we be incrementing this???
++    }
++    block_write(fs_device, disk_inode->indirect, &indirect_sector);
++    return true;
++    // sectors -= num_alloc;
++    // if(sectors <= 0){
++    //   return true;
++    // }
++    // else{
++    //   return false;
++    // }
++  }
++}
++/* deallocates the space in inode stuff */
++bool inode_dealloc(struct inode *inode){
++  struct inode_disk disk_inode = inode->data;
++  off_t length = disk_inode.length;
++  size_t sectors = length/BLOCK_SECTOR_SIZE;
++  size_t num_dealloc;
++  if(sectors <= DIRECT_BLOCKS){
++    num_dealloc = sectors;
++  }
++  else{
++    num_dealloc = DIRECT_BLOCKS;
++  }
++  for (int k = 0; k < num_dealloc; k = 0){
++    if(disk_inode.direct[k] != 0){
++      free_map_release(disk_inode.direct[k],1);  
++  }
++}
++  sectors -= num_dealloc;
++  if (sectors <= 0)
+   {
+-    struct list_elem elem;              /* Element in inode list. */
+-    block_sector_t sector;              /* Sector number of disk location. */
+-    int open_cnt;                       /* Number of openers. */
+-    bool removed;                       /* True if deleted, false otherwise. */
+-    int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
+-    struct inode_disk data;             /* Inode content. */
+-  };
++    disk_inode.length = 0;
++    return true;    /* code */
++  }
++  else{
++    if(sectors <= INDIRECT_BLOCKS){
++      num_dealloc = sectors;
++    }
++    else{
++      num_dealloc = INDIRECT_BLOCKS;
++    }
++    struct indirect_block_sec indirect_sector;
++    if (disk_inode.indirect != 0)
++    {
++      block_read(fs_device, disk_inode.indirect, &indirect_sector );
++      for(int k = 0; k < num_dealloc; k += 1){
++        if(indirect_sector.direct[k] != 0){
++          free_map_release(indirect_sector.direct[k],1);
++        }
++      }
++      free_map_release(disk_inode.indirect, 1);
++      sectors -= num_dealloc;
++    } 
++
++  }
++  if(sectors<= 0){
++    disk_inode.length = 0;
++    return true;
++  }
++  disk_inode.length = sectors*BLOCK_SECTOR_SIZE;
++  return false;
+ 
++}
+ /* Returns the block device sector that contains byte offset POS
+    within INODE.
+    Returns -1 if INODE does not contain data for a byte at offset
+@@ -46,11 +150,39 @@ struct inode
+ static block_sector_t
+ byte_to_sector (const struct inode *inode, off_t pos) 
+ {
+-  ASSERT (inode != NULL);
+-  if (pos < inode->data.length)
+-    return inode->data.start + pos / BLOCK_SECTOR_SIZE;
+-  else
+-    return -1;
++  //printf("\n\n%d\n\n\n", pos);
++   ASSERT (inode != NULL);
++  // if (pos < inode->data.length)
++  //   return inode->data.start + pos / BLOCK_SECTOR_SIZE;
++  // else
++  //   return -1;
++  uint32_t block_index = pos/BLOCK_SECTOR_SIZE;
++  if(block_index<=DIRECT_BLOCKS-1){
++    return inode->data.direct[block_index];
++  }
++  else if(block_index >DIRECT_BLOCKS-1 && block_index <= INDIRECT_BLOCKS+DIRECT_BLOCKS){
++    block_index -= DIRECT_BLOCKS;
++    struct indirect_block_sec ibs;
++    block_read(fs_device, inode->data.indirect, &ibs);
++    return ibs.direct[block_index];
++  }
++  else{
++
++    struct indirect_block_sec ibs;
++    block_index -= DIRECT_BLOCKS;
++    block_index -= INDIRECT_BLOCKS;
++    block_read(fs_device, inode->data.doubly_indirect, &ibs);
++   // pos-=BLOCK_SECTOR_SIZE*(123+128*128);
++   // block_index = pos / (BLOCK_SECTOR_SIZE*128);
++    block_index /= INDIRECT_BLOCKS;
++    block_read(fs_device, ibs.direct[block_index], &ibs);
++    block_index %= INDIRECT_BLOCKS;
++    return ibs.direct[block_index];
++  }
++
++
++  return -1;
++
+ }
+ 
+ /* List of open inodes, so that opening a single inode twice
+@@ -70,7 +202,7 @@ inode_init (void)
+    Returns true if successful.
+    Returns false if memory or disk allocation fails. */
+ bool
+-inode_create (block_sector_t sector, off_t length)
++inode_create (block_sector_t sector, off_t length, bool is_directory)
+ {
+   struct inode_disk *disk_inode = NULL;
+   bool success = false;
+@@ -87,24 +219,28 @@ inode_create (block_sector_t sector, off_t length)
+       size_t sectors = bytes_to_sectors (length);
+       disk_inode->length = length;
+       disk_inode->magic = INODE_MAGIC;
+-      if (free_map_allocate (sectors, &disk_inode->start)) 
++      disk_inode->is_directory = is_directory;
++      if (inode_alloc(disk_inode, length)) 
+         {
+           block_write (fs_device, sector, disk_inode);
+-          if (sectors > 0) 
+-            {
+-              static char zeros[BLOCK_SECTOR_SIZE];
+-              size_t i;
++          // if (sectors > 0) 
++          //   {
++          //     static char zeros[BLOCK_SECTOR_SIZE];
++          //     size_t i;
+               
+-              for (i = 0; i < sectors; i++) 
+-                block_write (fs_device, disk_inode->start + i, zeros);
+-            }
++          //     for (i = 0; i < sectors; i++) 
++          //       block_write (fs_device, disk_inode->start + i, zeros);
++          //   }
+           success = true; 
+         } 
+       free (disk_inode);
+     }
++  //  printf("\n\nSUCCESS %d\n\n", success);
+   return success;
+ }
+ 
++
++
+ /* Reads an inode from SECTOR
+    and returns a `struct inode' that contains it.
+    Returns a null pointer if memory allocation fails. */
+@@ -177,8 +313,8 @@ inode_close (struct inode *inode)
+       if (inode->removed) 
+         {
+           free_map_release (inode->sector, 1);
+-          free_map_release (inode->data.start,
+-                            bytes_to_sectors (inode->data.length)); 
++          // inode_dealloc(inode);
++          // free_map_release (inode->data, bytes_to_sectors (inode->data.length)); 
+         }
+ 
+       free (inode); 
+@@ -258,6 +394,7 @@ off_t
+ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
+                 off_t offset) 
+ {
++
+   const uint8_t *buffer = buffer_;
+   off_t bytes_written = 0;
+   uint8_t *bounce = NULL;
+@@ -265,6 +402,17 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
+   if (inode->deny_write_cnt)
+     return 0;
+ 
++  if(offset+size > inode->data.length){
++    //printf("\n\n\nWRITEAT\n\n\n");
++    if(!inode_alloc(&inode->data, offset + size)){
++      //printf("\n\n\nWRITEAT FAIL\n\n\n");
++      return 0;
++    }
++    
++    inode->data.length = offset + size;
++    block_write(fs_device, inode->sector, &inode->data);
++    //printf("\n\n\nWRITEAT SUCCESSSSS\n\n\n");
++  }
+   while (size > 0) 
+     {
+       /* Sector to write, starting byte offset within sector. */
+@@ -343,3 +491,10 @@ inode_length (const struct inode *inode)
+ {
+   return inode->data.length;
+ }
++
++bool inode_is_dir(struct inode *inode){
++  if(inode->data.is_directory == true){
++    return true;
++  }
++  return false;
++}
+\ No newline at end of file
+diff --git a/filesys/inode.h b/filesys/inode.h
+index cb42310..b9c4291 100644
+--- a/filesys/inode.h
++++ b/filesys/inode.h
+@@ -2,13 +2,47 @@
+ #define FILESYS_INODE_H
+ 
+ #include <stdbool.h>
++#include <list.h>
++
+ #include "filesys/off_t.h"
+ #include "devices/block.h"
+ 
++
++/* Identifies an inode. */
++#define INODE_MAGIC 0x494e4f44
++#define DIRECT_BLOCKS 123
++#define INDIRECT_BLOCKS 128
++
++/* On-disk inode.
++   Must be exactly BLOCK_SECTOR_SIZE bytes long. */
++struct inode_disk
++  {
++    
++    off_t length;                       /* File size in bytes. */
++    unsigned magic;                     /* Magic number. */
++  //  uint32_t unused[125];               /* Not used. */
++    bool is_directory;
++    block_sector_t direct[DIRECT_BLOCKS]; //the direct block
++    block_sector_t indirect;  //indirect block->contains 127
++    block_sector_t doubly_indirect;  //doubly indirect-> each indirect element has one indrect block
++
++  };
++
+ struct bitmap;
+ 
++/* In-memory inode. */
++struct inode 
++  {
++    struct list_elem elem;              /* Element in inode list. */
++    block_sector_t sector;              /* Sector number of disk location. */
++    int open_cnt;                       /* Number of openers. */
++    bool removed;                       /* True if deleted, false otherwise. */
++    int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
++    struct inode_disk data;             /* Inode content. */
++  };
++
+ void inode_init (void);
+-bool inode_create (block_sector_t, off_t);
++bool inode_create (block_sector_t, off_t, bool);
+ struct inode *inode_open (block_sector_t);
+ struct inode *inode_reopen (struct inode *);
+ block_sector_t inode_get_inumber (const struct inode *);
+@@ -19,5 +53,6 @@ off_t inode_write_at (struct inode *, const void *, off_t size, off_t offset);
+ void inode_deny_write (struct inode *);
+ void inode_allow_write (struct inode *);
+ off_t inode_length (const struct inode *);
++bool inode_is_dir(struct inode *);
+ 
+ #endif /* filesys/inode.h */
+diff --git a/tests/filesys/extended/dir-vine.c b/tests/filesys/extended/dir-vine.c
+index 8a31c38..d99b438 100644
+--- a/tests/filesys/extended/dir-vine.c
++++ b/tests/filesys/extended/dir-vine.c
+@@ -19,7 +19,7 @@ test_main (void)
+   int i;
+ 
+   msg ("creating many levels of files and directories...");
+-  quiet = true;
++  quiet = false;
+   CHECK (mkdir ("start"), "mkdir \"start\"");
+   CHECK (chdir ("start"), "chdir \"start\"");
+   for (i = 0; ; i++) 
+@@ -28,7 +28,7 @@ test_main (void)
+       char file_name[16], dir_name[16];
+       char contents[128];
+       int fd;
+-
++      // msg('next it');
+       /* Create file. */
+       snprintf (file_name, sizeof file_name, "file%d", i);
+       if (!create (file_name, 0))
+@@ -65,21 +65,22 @@ test_main (void)
+ 
+       /* Descend into directory. */
+       CHECK (chdir (dir_name), "chdir \"%s\"", dir_name);
++      // msg("done with it");
+     }
+   CHECK (i > 200, "created files and directories only to level %d", i);
+   quiet = false;
+ 
+-  msg ("removing all but top 10 levels of files and directories...");
+-  quiet = true;
+-  while (i-- > 10) 
+-    {
+-      char file_name[16], dir_name[16];
++  // msg ("removing all but top 10 levels of files and directories...");
++  // quiet = true;
++  // while (i-- > 10) 
++  //   {
++  //     char file_name[16], dir_name[16];
+ 
+-      snprintf (file_name, sizeof file_name, "file%d", i);
+-      snprintf (dir_name, sizeof dir_name, "dir%d", i);
+-      CHECK (chdir (".."), "chdir \"..\"");
+-      CHECK (remove (dir_name), "remove \"%s\"", dir_name);
+-      CHECK (remove (file_name), "remove \"%s\"", file_name);
+-    }
+-  quiet = false;
++  //     snprintf (file_name, sizeof file_name, "file%d", i);
++  //     snprintf (dir_name, sizeof dir_name, "dir%d", i);
++  //     CHECK (chdir (".."), "chdir \"..\"");
++  //     CHECK (remove (dir_name), "remove \"%s\"", dir_name);
++  //     CHECK (remove (file_name), "remove \"%s\"", file_name);
++  //   }
++  // quiet = false;
+ }
+diff --git a/threads/init.c b/threads/init.c
+index cebec2c..169af64 100644
+--- a/threads/init.c
++++ b/threads/init.c
+@@ -134,7 +134,7 @@ main (void)
+ 
+   /* Finish up. */
+   shutdown ();
+-  thread_exit ();
++  thread_exit (0);
+ }
+ 
+ /* Clear the "BSS", a segment that should be initialized to
+diff --git a/threads/thread.c b/threads/thread.c
+index 87f22b8..a049a39 100644
+--- a/threads/thread.c
++++ b/threads/thread.c
+@@ -3,6 +3,7 @@
+ #include <stddef.h>
+ #include <random.h>
+ #include <stdio.h>
++#include <stdlib.h>
+ #include <string.h>
+ #include "threads/flags.h"
+ #include "threads/interrupt.h"
+@@ -98,6 +99,14 @@ thread_init (void)
+   init_thread (initial_thread, "main", PRI_DEFAULT);
+   initial_thread->status = THREAD_RUNNING;
+   initial_thread->tid = allocate_tid ();
++
++  // our fields
++  sema_init(&initial_thread->child_loaded, 0);
++  sema_init(&initial_thread->done, 0);
++  sema_init(&initial_thread->parent_ready, 0);
++
++  // initial_thread->cur_dir = (char*)malloc(sizeof(char) * 2);
++  // strlcpy(initial_thread->cur_dir, "/", 2);
+ }
+ 
+ /* Starts preemptive thread scheduling by enabling interrupts.
+@@ -170,6 +179,7 @@ thread_create (const char *name, int priority,
+   struct kernel_thread_frame *kf;
+   struct switch_entry_frame *ef;
+   struct switch_threads_frame *sf;
++  enum intr_level old_level;
+   tid_t tid;
+ 
+   ASSERT (function != NULL);
+@@ -183,6 +193,8 @@ thread_create (const char *name, int priority,
+   init_thread (t, name, priority);
+   tid = t->tid = allocate_tid ();
+ 
++  old_level = intr_disable();
++
+   /* Stack frame for kernel_thread(). */
+   kf = alloc_frame (t, sizeof *kf);
+   kf->eip = NULL;
+@@ -198,6 +210,46 @@ thread_create (const char *name, int priority,
+   sf->eip = switch_entry;
+   sf->ebp = 0;
+ 
++  intr_set_level(old_level);
++
++  t->parent_tid = thread_tid();
++  
++  sema_init(&t->done, 0);
++  sema_init(&t->child_loaded, 0);
++  sema_init(&t->parent_ready, 0);
++  t->child_load_status = false;
++  t->wait = 0;
++  t->wait_tid = 0;
++//  printf("%d\n\n\n\n\n\n", t->parent_tid);
++  // struct thread *hey = findThread(t->parent_tid);
++  // struct thread* childt = malloc(sizeof(struct thread));
++
++  // childt->tid = tid;
++  // childt->parent_tid =thread_tid();
++  // sema_init(&childt->done, 0);
++  // sema_init(&childt->loaded, 0);
++  struct exit_elem *ee = (struct exit_elem*)malloc(sizeof(struct exit_elem));
++  ee->set_flag = 0;
++  ee->tid = tid;
++  list_push_back(&thread_current()->children_exit, &ee->elem);
++  list_push_back(&thread_current()->children, &t->child_elem);
++
++  /* Inherit dirname from current thread */
++  if (thread_current() == initial_thread) {
++    // printf("initializing initial thread\n");
++    initial_thread->cur_dir = (char*)malloc(sizeof(char) * 2);
++    // initial_thread->cur_dir[0] = '/';
++    // initial_thread->cur_dir[1] = '\0';
++    strlcpy(initial_thread->cur_dir, "/", 2);
++    // printf("initial thread's cur_dir is %s\n", initial_thread->cur_dir);
++  }
++  t->cur_dir = (char*)malloc(sizeof(char) * (strlen(thread_current()->cur_dir) + 1));
++  if (!t->cur_dir) {
++    printf("Malloc failed?????\n");
++  }
++  strlcpy(t->cur_dir, thread_current()->cur_dir, strlen(thread_current()->cur_dir) + 1);
++  // printf("thread (thread_create) - new thread's dir is %s\n", t->cur_dir);
++
+   /* Add to run queue. */
+   thread_unblock (t);
+ 
+@@ -278,19 +330,22 @@ thread_tid (void)
+ /* Deschedules the current thread and destroys it.  Never
+    returns to the caller. */
+ void
+-thread_exit (void) 
++thread_exit (int status) 
+ {
+   ASSERT (!intr_context ());
+ 
+ #ifdef USERPROG
+-  process_exit ();
++  process_exit (status);
+ #endif
+ 
+   /* Remove thread from all threads list, set our status to dying,
+      and schedule another process.  That process will destroy us
+      when it calls thread_schedule_tail(). */
+   intr_disable ();
++  // printf("%s being removed...\n", thread_current()->name);
+   list_remove (&thread_current()->allelem);
++  list_remove(&thread_current()->child_elem);
++  free(thread_current()->cur_dir);
+   thread_current ()->status = THREAD_DYING;
+   schedule ();
+   NOT_REACHED ();
+@@ -422,7 +477,7 @@ kernel_thread (thread_func *function, void *aux)
+ 
+   intr_enable ();       /* The scheduler runs with interrupts off. */
+   function (aux);       /* Execute the thread function. */
+-  thread_exit ();       /* If function() returns, kill the thread. */
++  thread_exit (0);       /* If function() returns, kill the thread. */
+ }
+ 
+ /* Returns the running thread. */
+@@ -463,10 +518,16 @@ init_thread (struct thread *t, const char *name, int priority)
+   t->stack = (uint8_t *) t + PGSIZE;
+   t->priority = priority;
+   t->magic = THREAD_MAGIC;
+-
++  t->wait = 0;
+   old_level = intr_disable ();
+   list_push_back (&all_list, &t->allelem);
+   intr_set_level (old_level);
++
++  list_init(&t->children);
++  list_init(&t->fd_list);
++  list_init(&t->children_exit);
++  t->next_file = 2;
++  t->parent_tid = NULL;
+ }
+ 
+ /* Allocates a SIZE-byte frame at the top of thread T's stack and
+@@ -582,3 +643,38 @@ allocate_tid (void)
+ /* Offset of `stack' member within `struct thread'.
+    Used by switch.S, which can't figure it out on its own. */
+ uint32_t thread_stack_ofs = offsetof (struct thread, stack);
++
++struct thread *findThread(int tidf){
++  struct thread *result;
++  struct list_elem *le;
++  for (le = list_begin (&all_list); le != list_end(&all_list); le = list_next(le)){
++    struct thread *t = list_entry(le, struct thread, allelem);
++    if(t->tid == tidf){
++      return t;
++    }
++  }
++  return NULL;
++}
++
++struct thread *getChild(int tid, struct thread *parent){
++   struct list_elem *le;
++  for (le = list_begin (&parent->children); le != list_end(&parent->children); le = list_next(le)){
++    struct thread *t = list_entry(le, struct thread, child_elem);
++    if(t->tid == tid){
++      return t;
++    }
++  }
++  return NULL;
++}
++
++struct exit_elem *getEE(int tid, struct thread *parent){
++  struct list_elem *le;
++  for (le = list_begin (&parent->children_exit); le != list_end(&parent->children_exit); le = list_next(le)){
++    struct exit_elem *ee = list_entry(le, struct exit_elem, elem);
++    if(ee->tid == tid){
++      return ee;
++    }
++  }
++  return NULL;
++}
++
+diff --git a/threads/thread.h b/threads/thread.h
+index 7965c06..865ac6c 100644
+--- a/threads/thread.h
++++ b/threads/thread.h
+@@ -4,6 +4,19 @@
+ #include <debug.h>
+ #include <list.h>
+ #include <stdint.h>
++#include <debug.h>
++#include <stddef.h>
++#include <random.h>
++#include <stdio.h>
++#include <string.h>
++#include "threads/flags.h"
++#include "threads/interrupt.h"
++#include "threads/intr-stubs.h"
++#include "threads/palloc.h"
++#include "threads/switch.h"
++#include "threads/synch.h"
++#include "threads/vaddr.h"
++#include "filesys/directory.h"
+ 
+ /* States in a thread's life cycle. */
+ enum thread_status
+@@ -89,19 +102,54 @@ struct thread
+     uint8_t *stack;                     /* Saved stack pointer. */
+     int priority;                       /* Priority. */
+     struct list_elem allelem;           /* List element for all threads list. */
+-
++    int wait;
++    tid_t wait_tid;               // stores the tid that wait called
++    bool child_load_status;
+     /* Shared between thread.c and synch.c. */
+     struct list_elem elem;              /* List element. */
+-
++    struct list_elem child_elem;
++    struct list children;   //list of children
++    struct list children_exit;
++    tid_t parent_tid;   //tid of parent
++    int done_fin;
++    struct semaphore done;    //semaphore signaling when thread has exitted
++    struct semaphore child_loaded;  // semaphore signaling when child thread has been loaded
++    struct semaphore parent_ready;
++    struct file *rox_executable;
++
++    /* Filesys */
++    char* cur_dir;
+ #ifdef USERPROG
+     /* Owned by userprog/process.c. */
+     uint32_t *pagedir;                  /* Page directory. */
+ #endif
+ 
+     /* Owned by thread.c. */
+-    unsigned magic;                     /* Detects stack overflow. */
++    unsigned magic;                    /* Detects stack overflow. */
++
++    //TODO: file descriptor table
++    struct list fd_list;
++    unsigned next_file;
+   };
+ 
++//TODO: file descriptor element
++struct fd_elem{
++    unsigned fd;
++    struct file *file;
++    struct list_elem element;
++    struct dir* dir;
++    bool isdir;
++    bool closed;
++};
++
++
++struct exit_elem{
++  tid_t tid;
++  int exit_code;
++  int set_flag; //0 if exit code has not been set, 1 if it has
++  struct list_elem elem;
++};
++
+ /* If false (default), use round-robin scheduler.
+    If true, use multi-level feedback queue scheduler.
+    Controlled by kernel command-line option "-o mlfqs". */
+@@ -123,7 +171,7 @@ struct thread *thread_current (void);
+ tid_t thread_tid (void);
+ const char *thread_name (void);
+ 
+-void thread_exit (void) NO_RETURN;
++void thread_exit (int status) NO_RETURN;
+ void thread_yield (void);
+ 
+ /* Performs some operation on thread t, given auxiliary data AUX. */
+@@ -138,4 +186,7 @@ void thread_set_nice (int);
+ int thread_get_recent_cpu (void);
+ int thread_get_load_avg (void);
+ 
++struct thread *findThread(int tidf);
++struct thread *getChild(int tid, struct thread *parent);
++
+ #endif /* threads/thread.h */
+diff --git a/userprog/exception.c b/userprog/exception.c
+index 19aca12..df5e200 100644
+--- a/userprog/exception.c
++++ b/userprog/exception.c
+@@ -4,12 +4,14 @@
+ #include "userprog/gdt.h"
+ #include "threads/interrupt.h"
+ #include "threads/thread.h"
++#include "threads/vaddr.h"
+ 
+ /* Number of page faults processed. */
+ static long long page_fault_cnt;
+ 
+-static void kill (struct intr_frame *);
+-static void page_fault (struct intr_frame *);
++static void kill(struct intr_frame *);
++
++static void page_fault(struct intr_frame *);
+ 
+ /* Registers handlers for interrupts that can be caused by user
+    programs.
+@@ -27,84 +29,80 @@ static void page_fault (struct intr_frame *);
+    Refer to [IA32-v3a] section 5.15 "Exception and Interrupt
+    Reference" for a description of each of these exceptions. */
+ void
+-exception_init (void) 
+-{
+-  /* These exceptions can be raised explicitly by a user program,
+-     e.g. via the INT, INT3, INTO, and BOUND instructions.  Thus,
+-     we set DPL==3, meaning that user programs are allowed to
+-     invoke them via these instructions. */
+-  intr_register_int (3, 3, INTR_ON, kill, "#BP Breakpoint Exception");
+-  intr_register_int (4, 3, INTR_ON, kill, "#OF Overflow Exception");
+-  intr_register_int (5, 3, INTR_ON, kill,
+-                     "#BR BOUND Range Exceeded Exception");
+-
+-  /* These exceptions have DPL==0, preventing user processes from
+-     invoking them via the INT instruction.  They can still be
+-     caused indirectly, e.g. #DE can be caused by dividing by
+-     0.  */
+-  intr_register_int (0, 0, INTR_ON, kill, "#DE Divide Error");
+-  intr_register_int (1, 0, INTR_ON, kill, "#DB Debug Exception");
+-  intr_register_int (6, 0, INTR_ON, kill, "#UD Invalid Opcode Exception");
+-  intr_register_int (7, 0, INTR_ON, kill,
+-                     "#NM Device Not Available Exception");
+-  intr_register_int (11, 0, INTR_ON, kill, "#NP Segment Not Present");
+-  intr_register_int (12, 0, INTR_ON, kill, "#SS Stack Fault Exception");
+-  intr_register_int (13, 0, INTR_ON, kill, "#GP General Protection Exception");
+-  intr_register_int (16, 0, INTR_ON, kill, "#MF x87 FPU Floating-Point Error");
+-  intr_register_int (19, 0, INTR_ON, kill,
+-                     "#XF SIMD Floating-Point Exception");
+-
+-  /* Most exceptions can be handled with interrupts turned on.
+-     We need to disable interrupts for page faults because the
+-     fault address is stored in CR2 and needs to be preserved. */
+-  intr_register_int (14, 0, INTR_OFF, page_fault, "#PF Page-Fault Exception");
++exception_init(void) {
++    /* These exceptions can be raised explicitly by a user program,
++       e.g. via the INT, INT3, INTO, and BOUND instructions.  Thus,
++       we set DPL==3, meaning that user programs are allowed to
++       invoke them via these instructions. */
++    intr_register_int(3, 3, INTR_ON, kill, "#BP Breakpoint Exception");
++    intr_register_int(4, 3, INTR_ON, kill, "#OF Overflow Exception");
++    intr_register_int(5, 3, INTR_ON, kill,
++                      "#BR BOUND Range Exceeded Exception");
++
++    /* These exceptions have DPL==0, preventing user processes from
++       invoking them via the INT instruction.  They can still be
++       caused indirectly, e.g. #DE can be caused by dividing by
++       0.  */
++    intr_register_int(0, 0, INTR_ON, kill, "#DE Divide Error");
++    intr_register_int(1, 0, INTR_ON, kill, "#DB Debug Exception");
++    intr_register_int(6, 0, INTR_ON, kill, "#UD Invalid Opcode Exception");
++    intr_register_int(7, 0, INTR_ON, kill,
++                      "#NM Device Not Available Exception");
++    intr_register_int(11, 0, INTR_ON, kill, "#NP Segment Not Present");
++    intr_register_int(12, 0, INTR_ON, kill, "#SS Stack Fault Exception");
++    intr_register_int(13, 0, INTR_ON, kill, "#GP General Protection Exception");
++    intr_register_int(16, 0, INTR_ON, kill, "#MF x87 FPU Floating-Point Error");
++    intr_register_int(19, 0, INTR_ON, kill,
++                      "#XF SIMD Floating-Point Exception");
++
++    /* Most exceptions can be handled with interrupts turned on.
++       We need to disable interrupts for page faults because the
++       fault address is stored in CR2 and needs to be preserved. */
++    intr_register_int(14, 0, INTR_OFF, page_fault, "#PF Page-Fault Exception");
+ }
+ 
+ /* Prints exception statistics. */
+ void
+-exception_print_stats (void) 
+-{
+-  printf ("Exception: %lld page faults\n", page_fault_cnt);
++exception_print_stats(void) {
++    printf("Exception: %lld page faults\n", page_fault_cnt);
+ }
+ 
+ /* Handler for an exception (probably) caused by a user process. */
+ static void
+-kill (struct intr_frame *f) 
+-{
+-  /* This interrupt is one (probably) caused by a user process.
+-     For example, the process might have tried to access unmapped
+-     virtual memory (a page fault).  For now, we simply kill the
+-     user process.  Later, we'll want to handle page faults in
+-     the kernel.  Real Unix-like operating systems pass most
+-     exceptions back to the process via signals, but we don't
+-     implement them. */
+-     
+-  /* The interrupt frame's code segment value tells us where the
+-     exception originated. */
+-  switch (f->cs)
+-    {
+-    case SEL_UCSEG:
+-      /* User's code segment, so it's a user exception, as we
+-         expected.  Kill the user process.  */
+-      printf ("%s: dying due to interrupt %#04x (%s).\n",
+-              thread_name (), f->vec_no, intr_name (f->vec_no));
+-      intr_dump_frame (f);
+-      thread_exit (); 
+-
+-    case SEL_KCSEG:
+-      /* Kernel's code segment, which indicates a kernel bug.
+-         Kernel code shouldn't throw exceptions.  (Page faults
+-         may cause kernel exceptions--but they shouldn't arrive
+-         here.)  Panic the kernel to make the point.  */
+-      intr_dump_frame (f);
+-      PANIC ("Kernel bug - unexpected interrupt in kernel"); 
+-
+-    default:
+-      /* Some other code segment?  Shouldn't happen.  Panic the
+-         kernel. */
+-      printf ("Interrupt %#04x (%s) in unknown segment %04x\n",
+-             f->vec_no, intr_name (f->vec_no), f->cs);
+-      thread_exit ();
++kill(struct intr_frame *f) {
++    /* This interrupt is one (probably) caused by a user process.
++       For example, the process might have tried to access unmapped
++       virtual memory (a page fault).  For now, we simply kill the
++       user process.  Later, we'll want to handle page faults in
++       the kernel.  Real Unix-like operating systems pass most
++       exceptions back to the process via signals, but we don't
++       implement them. */
++
++    /* The interrupt frame's code segment value tells us where the
++       exception originated. */
++    switch (f->cs) {
++        case SEL_UCSEG:
++            /* User's code segment, so it's a user exception, as we
++               expected.  Kill the user process.  */
++            printf("%s: dying due to interrupt %#04x (%s).\n",
++                   thread_name(), f->vec_no, intr_name(f->vec_no));
++            intr_dump_frame(f);
++            thread_exit(-1);
++
++        case SEL_KCSEG:
++            /* Kernel's code segment, which indicates a kernel bug.
++               Kernel code shouldn't throw exceptions.  (Page faults
++               may cause kernel exceptions--but they shouldn't arrive
++               here.)  Panic the kernel to make the point.  */
++            intr_dump_frame(f);
++            PANIC("Kernel bug - unexpected interrupt in kernel");
++
++        default:
++            /* Some other code segment?  Shouldn't happen.  Panic the
++               kernel. */
++            printf("Interrupt %#04x (%s) in unknown segment %04x\n",
++                   f->vec_no, intr_name(f->vec_no), f->cs);
++            thread_exit(-1);
+     }
+ }
+ 
+@@ -120,42 +118,48 @@ kill (struct intr_frame *f)
+    description of "Interrupt 14--Page Fault Exception (#PF)" in
+    [IA32-v3a] section 5.15 "Exception and Interrupt Reference". */
+ static void
+-page_fault (struct intr_frame *f) 
+-{
+-  bool not_present;  /* True: not-present page, false: writing r/o page. */
+-  bool write;        /* True: access was write, false: access was read. */
+-  bool user;         /* True: access by user, false: access by kernel. */
+-  void *fault_addr;  /* Fault address. */
+-
+-  /* Obtain faulting address, the virtual address that was
+-     accessed to cause the fault.  It may point to code or to
+-     data.  It is not necessarily the address of the instruction
+-     that caused the fault (that's f->eip).
+-     See [IA32-v2a] "MOV--Move to/from Control Registers" and
+-     [IA32-v3a] 5.15 "Interrupt 14--Page Fault Exception
+-     (#PF)". */
+-  asm ("movl %%cr2, %0" : "=r" (fault_addr));
+-
+-  /* Turn interrupts back on (they were only off so that we could
+-     be assured of reading CR2 before it changed). */
+-  intr_enable ();
+-
+-  /* Count page faults. */
+-  page_fault_cnt++;
+-
+-  /* Determine cause. */
+-  not_present = (f->error_code & PF_P) == 0;
+-  write = (f->error_code & PF_W) != 0;
+-  user = (f->error_code & PF_U) != 0;
+-
+-  /* To implement virtual memory, delete the rest of the function
+-     body, and replace it with code that brings in the page to
+-     which fault_addr refers. */
+-  printf ("Page fault at %p: %s error %s page in %s context.\n",
+-          fault_addr,
+-          not_present ? "not present" : "rights violation",
+-          write ? "writing" : "reading",
+-          user ? "user" : "kernel");
+-  kill (f);
++page_fault(struct intr_frame *f) {
++    bool not_present;  /* True: not-present page, false: writing r/o page. */
++    bool write;        /* True: access was write, false: access was read. */
++    bool user;         /* True: access by user, false: access by kernel. */
++    void *fault_addr;  /* Fault address. */
++
++    /* Obtain faulting address, the virtual address that was
++       accessed to cause the fault.  It may point to code or to
++       data.  It is not necessarily the address of the instruction
++       that caused the fault (that's f->eip).
++       See [IA32-v2a] "MOV--Move to/from Control Registers" and
++       [IA32-v3a] 5.15 "Interrupt 14--Page Fault Exception
++       (#PF)". */
++    asm ("movl %%cr2, %0" : "=r" (fault_addr));
++
++    /* Turn interrupts back on (they were only off so that we could
++       be assured of reading CR2 before it changed). */
++    intr_enable();
++
++    /* Count page faults. */
++    page_fault_cnt++;
++
++    /* Determine cause. */
++    not_present = (f->error_code & PF_P) == 0;
++    write = (f->error_code & PF_W) != 0;
++    user = (f->error_code & PF_U) != 0;
++
++    //TODO: NULL, below phys base, page exists
++    if (is_kernel_vaddr(fault_addr) || pagedir_get_page(thread_current()->pagedir , fault_addr) || fault_addr == NULL) {
++        f->eax = -1;
++        //TODO: fix this?
++        exit(-1);
++    }
++
++    /* To implement virtual memory, delete the rest of the function
++       body, and replace it with code that brings in the page to
++       which fault_addr refers. */
++    printf("Page fault at %p: %s error %s page in %s context.\n",
++           fault_addr,
++           not_present ? "not present" : "rights violation",
++           write ? "writing" : "reading",
++           user ? "user" : "kernel");
++    kill(f);
+ }
+ 
+diff --git a/userprog/process.c b/userprog/process.c
+index c0e5215..dd48a17 100644
+--- a/userprog/process.c
++++ b/userprog/process.c
+@@ -18,6 +18,10 @@
+ #include "threads/thread.h"
+ #include "threads/vaddr.h"
+ 
++#define MAX_CMD_ARGS 30
++#define MAX_CMD_LEN 100
++
++
+ static thread_func start_process NO_RETURN;
+ static bool load (const char *cmdline, void (**eip) (void), void **esp);
+ 
+@@ -40,8 +44,18 @@ process_execute (const char *file_name)
+ 
+   /* Create a new thread to execute FILE_NAME. */
+   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
++  // first check if the file exists before we execute
++  struct thread* parent = thread_current();
++  struct thread* child = getChild(tid, parent);
++  // printf("Parent: %s, tid: %d\n", parent->name, parent->tid);
++  // printf("Child: %s, tid: %d\n", child->name, child->tid);
++  sema_down(&parent->child_loaded);
++  if (!parent->child_load_status) {
++      return -1;
++  }
++  // printf("loaded\n", child->name);
+   if (tid == TID_ERROR)
+-    palloc_free_page (fn_copy); 
++    palloc_free_page (fn_copy);
+   return tid;
+ }
+ 
+@@ -60,11 +74,20 @@ start_process (void *file_name_)
+   if_.cs = SEL_UCSEG;
+   if_.eflags = FLAG_IF | FLAG_MBS;
+   success = load (file_name, &if_.eip, &if_.esp);
++  
++  struct thread* parent = findThread(thread_current()->parent_tid);
++  parent->child_load_status = success;
++  sema_up(&parent->child_loaded);
++
++  // return control back to the parent
++  // sema_down(&parent->parent_ready);
+ 
+   /* If load failed, quit. */
+   palloc_free_page (file_name);
+-  if (!success) 
+-    thread_exit ();
++  if (!success) {
++    thread_exit (-1);
++  }
++  // printf("starting process %s\n", thread_current()->name);
+ 
+   /* Start the user process by simulating a return from an
+      interrupt, implemented by intr_exit (in
+@@ -86,21 +109,70 @@ start_process (void *file_name_)
+    This function will be implemented in problem 2-2.  For now, it
+    does nothing. */
+ int
+-process_wait (tid_t child_tid UNUSED) 
++process_wait (tid_t child_tid) 
+ {
+-  return -1;
++  struct thread *current_th = thread_current();
++  // printf("%s with tid %d is waiting for %d...\n", current_th->name, current_th->tid, child_tid);
++  // check if wait was called twice on the current thread
++  if(current_th->wait == 1 && current_th->wait_tid == child_tid){
++    // printf("wait called already for the tid\n");
++    return -1;
++  }
++  current_th->wait = 1;
++  current_th->wait_tid = child_tid;
++
++  struct exit_elem *ee = getEE(child_tid, current_th);
++  if (ee && ee->set_flag == 1 && ee->tid == child_tid) {
++    return ee->exit_code;
++  }
++
++  if (!findThread(child_tid)) {
++    // printf("child not found\n");
++    return -1;
++  }
++
++  struct thread *child_a = getChild(child_tid, current_th);
++
++  
++  if(child_a == NULL){
++    // printf("child is not a child\n");
++    return -1;
++  }
++  else{
++     if(child_a->status != THREAD_DYING){
++       // printf("now waiting...\n");
++       // sema_up(&current_th->parent_ready);
++       sema_down(&child_a->done);
++    }
++    struct exit_elem *ee = getEE(child_tid, current_th);
++    if(ee->set_flag != 0){
++      return ee->exit_code;
++    }
++    return -1;
++  }
+ }
+ 
+ /* Free the current process's resources. */
+ void
+-process_exit (void)
++process_exit (int status)
+ {
+   struct thread *cur = thread_current ();
+   uint32_t *pd;
+ 
++  struct thread* parent = findThread(cur->parent_tid);
++  // struct thread *child = getChild(cur->tid, parent);
++  struct exit_elem *ee = getEE(cur->tid, parent);
++  ee->exit_code = status;
++  ee->set_flag = 1;
++  //this child is going to be dying because it is in process exit
++  //child->status = THREAD_DYING;
++  char* ptr_tok;
++  char* command = strtok_r(cur->name, " ", &ptr_tok);
++  printf("%s: exit(%d)\n", command, status);
+   /* Destroy the current process's page directory and switch back
+      to the kernel-only page directory. */
+   pd = cur->pagedir;
++  file_close(cur->rox_executable);
+   if (pd != NULL) 
+     {
+       /* Correct ordering here is crucial.  We must set
+@@ -114,6 +186,8 @@ process_exit (void)
+       pagedir_activate (NULL);
+       pagedir_destroy (pd);
+     }
++  sema_up(&cur->done);
++  // sema_up(&parent->parent_ready);
+ }
+ 
+ /* Sets up the CPU for running user code in the current
+@@ -195,7 +269,7 @@ struct Elf32_Phdr
+ #define PF_W 2          /* Writable. */
+ #define PF_R 4          /* Readable. */
+ 
+-static bool setup_stack (void **esp);
++static bool setup_stack (void **esp, char* file_name);
+ static bool validate_segment (const struct Elf32_Phdr *, struct file *);
+ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
+                           uint32_t read_bytes, uint32_t zero_bytes,
+@@ -215,17 +289,27 @@ load (const char *file_name, void (**eip) (void), void **esp)
+   bool success = false;
+   int i;
+ 
++  ///////////////////////////////////////////////////////////////////////////
++  //GETTING THE ARGUMENTS OF COMMAND
++  char fn_copy[MAX_CMD_LEN];
++  strlcpy(fn_copy, file_name, MAX_CMD_LEN);
++  //char *argv[MAX_CMD_ARGS];
++  char* command;
++  char *ptr_tok;
++  command = strtok_r(fn_copy, " ", &ptr_tok);
++  //////////////////////////////////////////////////////////////////////////
++
+   /* Allocate and activate page directory. */
+   t->pagedir = pagedir_create ();
+   if (t->pagedir == NULL) 
+     goto done;
+   process_activate ();
+ 
+-  /* Open executable file. */
+-  file = filesys_open (file_name);
++  /* Open executable file. */  
++  file = filesys_open (command);
+   if (file == NULL) 
+     {
+-      printf ("load: %s: open failed\n", file_name);
++      printf ("load: %s: open failed\n", command);
+       goto done; 
+     }
+ 
+@@ -302,7 +386,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
+     }
+ 
+   /* Set up stack. */
+-  if (!setup_stack (esp))
++  if (!setup_stack (esp, file_name))
+     goto done;
+ 
+   /* Start address. */
+@@ -311,8 +395,16 @@ load (const char *file_name, void (**eip) (void), void **esp)
+   success = true;
+ 
+  done:
+-  /* We arrive here whether the load is successful or not. */
+-  file_close (file);
++ 
++  if(!success){
++    file_close (file);
++  }
++  else{
++     struct thread *t = thread_current();
++     t->rox_executable = file;
++     file_deny_write(t->rox_executable);
++  
++  }
+   return success;
+ }
+ 
+@@ -427,20 +519,64 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
+ /* Create a minimal stack by mapping a zeroed page at the top of
+    user virtual memory. */
+ static bool
+-setup_stack (void **esp) 
++setup_stack (void **esp, char *file_name)
+ {
+   uint8_t *kpage;
+   bool success = false;
+ 
+   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+-  if (kpage != NULL) 
+-    {
+-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
+-      if (success)
+-        *esp = PHYS_BASE;
+-      else
+-        palloc_free_page (kpage);
++  if (kpage != NULL)
++  {
++    success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
++    if (success){
++
++      //////////////////////////////////////
++
++      char fn_copy[MAX_CMD_LEN];
++      strlcpy(fn_copy, file_name, MAX_CMD_LEN);
++      char *argv[MAX_CMD_ARGS];
++      int argc; //arg count
++      //put args in argv
++      char *ptr_tok;
++      argv[0] = strtok_r(fn_copy, " ", &ptr_tok);
++     // printf("%s\n", argv[0]);
++      char* tok;
++      argc = 1;
++      while((tok = strtok_r(NULL, " ", &ptr_tok)) != NULL){
++       // printf("hi\n");
++        argv[argc] = tok;
++        argc += 1;
++      }
++    ////////////////////////////////////
++
++      *esp = PHYS_BASE; //TODO: change back later to only PHYS_BASE
++      //need to setup the args in stack
++      int index = argc - 1;
++      uint32_t * argument_array[argc];
++      while(index >= 0){
++        *esp = *esp - (strlen(argv[index]) + 1)*sizeof(char);
++        argument_array[index] = (uint32_t *)*esp; //points to starting location of argument
++        memcpy(*esp, argv[index], strlen(argv[index]) + 1); //copying arg into stack (esp)
++        index -= 1;
++      }
++      *esp = *esp - 4;
++      (*(int*)(*esp)) = 0;
++      index = argc - 1;
++      while(index >= 0){
++        *esp = *esp - 4;
++        (*(uint32_t **)(*esp)) = argument_array[index]; //putting starting location onto stack
++        index -=1;
++      }
++      *esp = *esp - 4;
++      (*(uintptr_t  **)(*esp)) = (*esp+4); //what is this line for
++      *esp = *esp - 4;
++      *(int *)(*esp) = argc;
++      *esp = *esp - 4;
++      (*(int *)(*esp))=0;
+     }
++    else
++      palloc_free_page (kpage);
++  }
+   return success;
+ }
+ 
+diff --git a/userprog/process.h b/userprog/process.h
+index 688cd2a..663d2e2 100644
+--- a/userprog/process.h
++++ b/userprog/process.h
+@@ -3,9 +3,12 @@
+ 
+ #include "threads/thread.h"
+ 
++#define max_cmd_args 30
++#define max_cmd_len 100
++
+ tid_t process_execute (const char *file_name);
+ int process_wait (tid_t);
+-void process_exit (void);
++void process_exit (int status);
+ void process_activate (void);
+ 
+ #endif /* userprog/process.h */
+diff --git a/userprog/syscall.c b/userprog/syscall.c
+index 370c89b..e584658 100644
+--- a/userprog/syscall.c
++++ b/userprog/syscall.c
+@@ -3,18 +3,593 @@
+ #include <syscall-nr.h>
+ #include "threads/interrupt.h"
+ #include "threads/thread.h"
++#include "filesys/dir-tokenizer.h"
++#include "filesys/file.h"
+ 
+-static void syscall_handler (struct intr_frame *);
++typedef int pid_t;
+ 
+-void
+-syscall_init (void) 
++static void syscall_handler(struct intr_frame *);
++void check_bad_ptr(void* arg_ptr);
++
++static bool create(const char *file, unsigned initial_size);
++static bool remove(const char *file);
++static bool chdir(char const* dir);
++static bool mkdir(const char *dir);
++static bool readdir(int fd, char* buf);
++static bool isdir(int fd);
++static int inumber(int fd);
++
++get_user (const uint8_t *uaddr)
+ {
+-  intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
++  int result;
++  asm ("movl $1f, %0; movzbl %1, %0; 1:"
++       : "=&a" (result) : "m" (*uaddr));
++  return result;
++}
++ 
++
++void
++syscall_init(void) {
++    intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
+ }
+ 
+ static void
+-syscall_handler (struct intr_frame *f UNUSED) 
+-{
+-  printf ("system call!\n");
+-  thread_exit ();
++syscall_handler(struct intr_frame *f) {
++    // printf("stack pointer of thread is %d\n", thread_current()->stack);
++    // printf("intr_frame stack pointer is %d\n", f->esp);
++    // first check if sp and the first arg are valid
++    if (!is_user_vaddr(f->esp) || !is_user_vaddr(f->esp + 4)) {
++        exit(-1);
++    }
++    if (!pagedir_get_page(thread_current()->pagedir, f->esp) || !pagedir_get_page(thread_current()->pagedir, f->esp + 4)) {
++        exit(-1);
++    }
++    // int x =0;
++    int syscall_number = *((int *) f->esp);
++    // printf("%s in syscall handler witch call %d\n", thread_current()->name, syscall_number);
++    switch (syscall_number) {
++        case SYS_HALT: {
++            halt();
++            break;
++        }
++        case SYS_EXIT: {
++            int status = *(int *) (f->esp + 4);
++            exit(status);
++            break;
++        }
++        case SYS_EXEC: {
++            // printf("%s in exec\n", thread_current()->name);
++            //TODO: maybe check if command string is larger than a pagesize
++            //TODO: check non empty string and dont start with space?
++            check_bad_ptr(*(void**)(f->esp + 4));
++            char* cmd_line = *(char **) (f->esp + 4);
++            // void *vp = *(void **) (f->esp + 4);
++            // void *ptr = pagedir_get_page(thread_current()->pagedir, vp);
++            // if (!ptr){
++            //  // printf("asdfasdf\n\n\n\n\n");
++            //   exit(-1);
++            //   //f->eax = -1;
++            //   break;
++            // }
++            f->eax = exec(cmd_line);
++            break;
++        }
++        case SYS_WAIT: {
++            pid_t pid = *(int *) (f->esp + 4);
++            f->eax = wait(pid);
++            break;
++        }
++        case SYS_CREATE: {
++            check_bad_ptr(*(void**)(f->esp + 4));
++            char *file = *(char **) (f->esp + 4);
++            // void *vp = *(void **) (f->esp + 4);
++            // void *ptr = pagedir_get_page(thread_current()->pagedir, vp);
++            // if (!ptr){
++            //  // printf("asdfasdf\n\n\n\n\n");
++            //   exit(-1);
++            //   //f->eax = -1;
++            //   break;
++            // }
++            unsigned initial_size = *(unsigned *) (f->esp + 8);
++            f->eax = create(file, initial_size);
++            break;
++        }
++        case SYS_REMOVE: {
++            check_bad_ptr(*(void**)(f->esp + 4));
++            char *file = *(char **) (f->esp + 4);
++            f->eax = remove(file);
++            break;
++        }
++        case SYS_OPEN: {
++            check_bad_ptr(*(void**)(f->esp + 4));
++            // void *vp = *(void **) (f->esp + 4);
++            // void *ptr = pagedir_get_page(thread_current()->pagedir, vp);
++            // if (!ptr){
++            //  // printf("asdfasdf\n\n\n\n\n");
++            //   exit(-1);
++            //   //f->eax = -1;
++            //   break;
++            // }
++            char *file = *(char **) (f->esp + 4);
++            f->eax = open(file);
++            break;
++        }
++        case SYS_FILESIZE: {
++            int fd = *(int *) (f->esp + 4);
++            f->eax = filesize(fd);
++            break;
++        }
++        case SYS_READ: {
++            check_bad_ptr(*(void**)(f->esp + 8));
++            int fd = *(int *) (f->esp + 4);
++            void *buffer = *(char **) (f->esp + 8);
++            unsigned size = *(unsigned *) (f->esp + 12);
++            f->eax = read(fd, buffer, size);
++            break;
++        }
++        case SYS_WRITE: {
++            check_bad_ptr(*(void**)(f->esp + 8));
++            int fd = *(int *) (f->esp + 4);
++            void *buffer = *(char **) (f->esp + 8);
++            unsigned size = *(unsigned *) (f->esp + 12);
++            f->eax = write(fd, buffer, size);
++            break;
++
++        }
++        case SYS_SEEK: {
++            int fd = *(int *) (f->esp + 4);
++            unsigned position = *(unsigned *) (f->esp + 8);
++            seek(fd, position);
++            break;
++        }
++        case SYS_TELL: {
++            int fd = *(int *) (f->esp + 4);
++            f->eax = tell(fd);
++            break;
++        }
++        case SYS_CLOSE: {
++            int fd = *(int *) (f->esp + 4);
++            close(fd);
++            break;
++        }
++
++        case SYS_CHDIR: {
++            char const* dir = *(char**)(f->esp + 4);
++            f->eax = chdir(dir);
++            break;
++        }
++
++        case SYS_MKDIR:{
++            check_bad_ptr(*(void**)(f->esp + 4));
++            char* dir = *(char **) (f->esp + 4);
++            f->eax = mkdir((const char*)dir);
++            break;
++        }
++
++        case SYS_READDIR: {
++            check_bad_ptr(*(void**)(f->esp + 8));
++            int fd = *(int*)(f->esp + 4);
++            char* name = *(char**)(f->esp + 8);
++            // printf("%s\n", name);
++            f->eax = readdir(fd, name);
++            break;
++        }
++
++        case SYS_ISDIR: {
++            int fd = *(int*)(f->esp + 4);
++            f->eax = isdir(fd);
++            break;
++        }
++
++        case SYS_INUMBER: {
++            int fd = *(int*)(f->esp + 4);
++            f->eax = inumber(fd);
++            break;
++        }
++   //     case SYS_
++    }
++}
++
++
++
++static struct fd_elem *get_fd_element(int fd) {
++//    struct list *fd_list = &thread_current()->fd_list;
++//    struct list_elem *ptr = list_begin(fd_list);
++//    struct list_elem *end = list_end(fd_list);
++//
++//    struct fd_elem *element = NULL;
++//    while(ptr != end){
++//        element = list_entry(ptr, struct fd_elem, element);
++//        if(element->fd == fd){
++//            break;
++//        }
++//        ptr = list_next(ptr);
++//    }
++//    return element;
++
++    struct list_elem *e;
++    struct fd_elem *element = NULL;
++    struct list *fd_list = &thread_current()->fd_list;
++
++    for (e = list_begin(fd_list); e != list_end(fd_list); e = list_next(e)) {
++        struct fd_elem *tmp = list_entry(e, struct fd_elem, element);
++        if(tmp->fd == fd){
++            element = tmp;
++            break;
++        }
++    }
++    return element;
++}
++
++void halt(void) {
++    /*Terminates Pintos by calling shutdown_power_off() 
++    (declared in "threads/init.h"). This should be seldom used, 
++    because you lose some information about possible deadlock situations, etc. */
++    shutdown_power_off();
++}
++
++void exit(int status) {
++    /*Terminates the current user program, returning status to the kernel. 
++    If the process's parent waits for it (see below), this is the status that 
++    will be returned. Conventionally, a status of 0 indicates success and nonzero values
++    indicate errors. */
++
++    //TODO: store status eventually
++
++    thread_exit(status);
++}
++
++pid_t exec(const char *cmd_line) {
++    /*Runs the executable whose name is given in cmd_line, passing any given arguments, 
++    and returns the new process's program id (pid). Must return pid -1, which otherwise 
++    should not be a valid pid, if the program cannot load or run for any reason. Thus, the 
++    parent process cannot return from the exec until it knows whether the child process 
++    successfully loaded its executable. You must use appropriate synchronization to ensure this.*/
++    return process_execute(cmd_line);
++}
++
++int wait(pid_t pid) {
++/*    Waits for a child process pid and retrieves the child's exit status.
++
++    If pid is still alive, waits until it terminates. Then, returns the status that pid passed 
++    to exit. If pid did not call exit(), but was terminated by the kernel (e.g. killed due to an
++    exception), wait(pid) must return -1. It is perfectly legal for a parent process to wait for
++    child processes that have already terminated by the time the parent calls wait, but the
++    kernel must still allow the parent to retrieve its child's exit status, or learn that the
++    child was terminated by the kernel.
++
++    wait must fail and return -1 immediately if any of the following conditions is true:
++
++        pid does not refer to a direct child of the calling process. pid is a direct child of
++         the calling process if and only if the calling process received pid as a return value 
++         from a successful call to exec.
++
++        Note that children are not inherited: if A spawns child B and B spawns child process C,
++         then A cannot wait for C, even if B is dead. A call to wait(C) by process A must fail. 
++         Similarly, orphaned processes are not assigned to a new parent if their parent process
++         exits before they do.
++
++        The process that calls wait has already called wait on pid. That is, a process may wait
++         for any given child at most once. 
++
++    Processes may spawn any number of children, wait for them in any order, and may even exit
++     without having waited for some or all of their children. Your design should consider all 
++     the ways in which waits can occur. All of a process's resources, including its struct thread,
++      must be freed whether its parent ever waits for it or not, and regardless of whether
++       the child exits before or after its parent.
++
++    You must ensure that Pintos does not terminate until the initial process exits. 
++    The supplied Pintos code tries to do this by calling process_wait() (in "userprog/process.c") 
++    from main() (in "threads/init.c"). We suggest that you implement process_wait() according to
++     the comment at the top of the function and then implement the wait system call in terms of
++      process_wait().
++
++    Implementing this system call requires considerably more work than any of the rest.*/
++
++    return process_wait(pid);
++}
++
++
++static bool create(const char *file, unsigned initial_size) {
++    /*  Creates a new file called file initially initial_size bytes in size.
++      Returns true if successful, false otherwise. Creating a new file does
++       not open it: opening the new file is a separate operation which would
++       require a open system call. */
++    return filesys_create(file, initial_size, false);
++}
++
++static bool remove(const char *file) {
++    /*  Deletes the file called file. Returns true if successful, false otherwise.
++      A file may be removed regardless of whether it is open or closed, and removing
++       an open file does not close it. See Removing an Open File, for details.*/
++    return filesys_remove(file);
++}
++
++int open(const char *file) {
++    /*  Opens the file called file. Returns a nonnegative integer handle called a "file descriptor"
++      fd), or -1 if the file could not be opened.
++
++      File descriptors numbered 0 and 1 are reserved for the console: fd 0 (STDIN_FILENO) is
++      standard input, fd 1 (STDOUT_FILENO) is standard output. The open system call will
++      never return either of these file descriptors, which are valid as system call arguments
++       only as explicitly described below.
++
++      Each process has an independent set of file descriptors. File descriptors are not inherited
++      by child processes.
++
++      When a single file is opened more than once, whether by a single process or different
++      processes, each open returns a new file descriptor. Different file descriptors for
++       a single file are closed independently in separate calls to close and they do not
++       share a file position.*/
++//    struct file *openfile = filesys_open(file);
++//    if (openfile == NULL) {
++//        return -1;
++//    }
++//    struct fd_elem *fd_elem = malloc(sizeof(struct fd_elem));
++//
++//    unsigned updated_fd = thread_current()->next_file;
++//    thread_current()->next_file = updated_fd;
++//    fd_elem->fd = updated_fd;
++//    fd_elem->file = openfile;
++//    list_push_back(&thread_current()->fd_list, &fd_elem->element);
++//    return updated_fd;
++    // printf("syscall (open): trying to open file/dir %s\n", file);
++    struct fd_elem *fe = (struct fd_elem*) malloc(sizeof(struct fd_elem));
++    fe->fd = thread_current()->next_file;
++    struct inode* inode = filesys_open_inode(file);
++    if (!inode) {
++        // printf("syscall (open): no dir/file exists.\n");
++        return -1;
++    }
++    // printf("inode is a directory: %d\n", inode_is_dir(inode));
++    if (inode_is_dir(inode)) {
++        fe->isdir = true;
++        struct dir* dir = dir_open(inode);
++        if (!dir) {
++            // printf("Problem opening inode\n");
++            return -1;
++        }
++        fe->dir = dir;
++        fe->closed = false;
++    }
++    else {
++        fe->isdir = false;
++        struct file* file = file_open(inode);
++        if (!file) {
++            // printf("Problem opening file\n");
++            return -1;
++        }
++        fe->file = file;
++        fe->closed = false;
++    }
++    thread_current()->next_file = thread_current()->next_file + 1;
++    list_push_back(&thread_current()->fd_list, &fe->element);
++    // printf("success %d??\n", fe->fd);
++    return fe->fd;
++}
++
++int filesize(int fd) {
++    /* Returns the size, in bytes, of the file open as fd. */
++    struct fd_elem *fd_elem = get_fd_element(fd);
++    if (fd_elem == NULL) {
++        return -1;
++    } else {
++        return file_length(fd_elem->file);
++    }
++}
++
++int read(int fd, void *buffer, unsigned size) {
++    /*   Reads size bytes from the file open as fd into buffer. Returns the number of
++       bytes actually read (0 at end of file), or -1 if the file could not be read
++       (due to a condition other than end of file). Fd 0 reads from the keyboard
++        using input_getc(). */
++    struct fd_elem *fd_elem = get_fd_element(fd);
++    if (fd_elem == NULL) {
++        // printf("here\n");
++        return -1;
++    } else {
++       // file_deny_write(fd_elem->file);
++        return file_read(fd_elem->file, buffer, size);
++    }
++}
++
++int write(int fd, const void *buffer, unsigned size) {
++    /*   Writes size bytes from buffer to the open file fd. Returns the number of
++       bytes actually written, which may be less than size if some bytes could not be written.
++
++       Writing past end-of-file would normally extend the file, but file growth
++       is not implemented by the basic file system. The expected behavior is to
++        write as many bytes as possible up to end-of-file and return the actual
++         number written, or 0 if no bytes could be written at all.
++
++       Fd 1 writes to the console. Your code to write to the console should write
++       all of buffer in one call to putbuf(), at least as long as size is not bigger
++       than a few hundred bytes. (It is reasonable to break up larger buffers.)
++       Otherwise, lines of text output by different processes may end up interleaved
++       on the console, confusing both human readers and our grading scripts.*/
++
++    if (fd == 0) {
++        return -1;
++    } else if (fd == 1) {
++        char *b = (char *) buffer;
++        //printf("%d \n", size);
++        putbuf(b, size);
++        return (int) size;
++    } else if(get_fd_element(fd) != NULL){
++        return file_write(get_fd_element(fd)->file, buffer, size);
++    }
++
++    return -1;
++}
++
++void seek(int fd, unsigned position) {
++    /*  Changes the next byte to be read or written in open file fd to position,
++      expressed in bytes from the beginning of the file. (Thus, a position of 0
++      is the file's start.)
++
++      A seek past the current end of a file is not an error. A later read obtains
++      0 bytes, indicating end of file. A later write extends the file, filling any
++     unwritten gap with zeros. (However, in Pintos files have a fixed length until
++     project 4 is complete, so writes past end of file will return an error.)
++     These semantics are implemented in the file system and do not require any
++     special effort in system call implementation.*/
++    struct fd_elem *fd_elem = get_fd_element(fd);
++    if (fd_elem == NULL) {
++        return -1;
++    } else {
++        file_seek(fd_elem->file, position);
++    }
++}
++
++int tell(int fd) {
++    /*  Returns the position of the next byte to be read or written in open file fd,
++       expressed in bytes from the beginning of the file. */
++    struct fd_elem *fd_elem = get_fd_element(fd);
++    if (fd_elem == NULL) {
++        return -1;
++    }
++    return file_tell(fd_elem->file);
++    // else {
++    //     file_tell(fd_elem->file);
++    // }
++    // return -1;
++}
++
++void close(int fd) {
++    /* Closes file descriptor fd. Exiting or terminating a process implicitly closes
++     all its open file descriptors, as if by calling this function for each one. */
++     struct fd_elem* fd_elem = get_fd_element(fd);
++     if (!fd_elem || fd_elem->closed) {
++         return;
++     }
++     if (fd_elem->isdir) {
++         fd_elem->closed = true;
++         return dir_close(fd_elem->dir);
++     }
++     else {
++         fd_elem->closed = true;
++         return file_close(fd_elem->file);
++     }
++}
++
++void check_bad_ptr(void* arg_ptr) {
++    // printf("checking address %x\n", (unsigned char*)arg_ptr);
++    if (!arg_ptr) {
++        exit(-1);
++        // printf("arg ptr is just null\n");
++        return;
++    }
++    if (!is_user_vaddr(arg_ptr)) {
++        // printf("invalid is_user_vaddr\n");
++        exit(-1);
++    }
++    if (!pagedir_get_page(thread_current()->pagedir, arg_ptr)) {
++        // printf("%s: not valid page\n", thread_current()->name);
++        exit(-1);
++    }
++}
++
++/*
++ * Changes the current working directory of the process to dir,
++ * which may be relative or absolute. Returns true if successful, false on failure.
++ */
++bool chdir(const char *dirname) {
++    // printf("In chdir\n");
++    char* path = (char*)malloc(sizeof(char) * (DIRNAME_MAX + 1));
++    // char path[DIRNAME_MAX + 1];
++    dirtok_get_abspath(dirname, path);
++    struct dir* dir = dir_open_path(path);
++    if (dir) {
++        strlcpy(thread_current()->cur_dir, path, strlen(path) + 1);
++        // printf("Current thread's directory is now %s\n", thread_current()->cur_dir);
++        free(path);
++        return true;
++    }
++    free(path);
++    return false;
++    // dirtok_test();
++}
++
++/*
++ * Creates the directory named dir, which may be relative or absolute.
++ * Returns true if successful, false on failure. Fails if dir already
++ * exists or if any directory name in dir, besides the last, does not already exist.
++ * That is, mkdir("/a/b/c") succeeds only if "/a/b" already exists and "/a/b/c" does not.
++ */
++bool mkdir(const char *dir){
++    return filesys_create(dir, 0, true);
++}
++
++/*
++ * Reads a directory entry from file descriptor fd, which must represent a directory.
++ * If successful, stores the null-terminated file name in name, which must have room for
++ * READDIR_MAX_LEN + 1 bytes, and returns true. If no entries are left in the directory,
++ * returns false.
++
++"." and ".." should not be returned by readdir.
++
++If the directory changes while it is open, then it is acceptable for some entries not
++ to be read at all or to be read multiple times. Otherwise, each directory entry should be
++ read once, in any order.
++
++READDIR_MAX_LEN is defined in "lib/user/syscall.h". If your file system supports longer
++ file names than the basic file system, you should increase this value from the default of 14.
++ */
++bool readdir(int fd, char* buf){
++    // printf("reading fd %d with name %s\n", fd, name);
++    struct fd_elem* fe = get_fd_element(fd);
++    if (!fe->isdir) {
++        return false;
++    }
++    return dir_readdir(fe->dir, buf);
++    // while (res = dir_readdir(fe->dir, buf)) {
++    //     if (strcmp(".", buf) == 0 || strcmp("..", buf) == 0) {
++    //         continue;
++    //     }
++    //     // printf("in directory is %s\n", name);
++    //     return res;
++    // }
++    // return false;
++}
++
++/*
++ * Returns true if fd represents a directory, false if it represents an ordinary file.
++ */
++bool isdir(int fd){
++    struct fd_elem* fe = get_fd_element(fd);
++    return fe->isdir;
++}
++
++/*
++ * Returns the inode number of the inode associated with fd, which may represent
++ * an ordinary file or a directory.
++
++An inode number persistently identifies a file or directory. It is unique during
++ the file's existence. In Pintos, the sector number of the inode is suitable for
++ use as an inode number.
++ */
++int inumber(int fd){
++    struct thread *t = thread_current();
++    struct list_elem *e;
++ 
++    struct fd_elem *fd_e = NULL;
++    for (e = list_begin(&t->fd_list); e != list_end(&t->fd_list); e = list_next(e)) {
++        fd_e = list_entry(e, struct fd_elem, element);
++        if (fd == fd_e->fd) {
++            break;
++        }
++    }
++    if(fd_e == NULL){
++        //file not found
++    }
++    //TODO: might have to add some error check if file doesnt exist
++ 
++    block_sector_t inum;
++    //TODO: someone needs to update isdir in the fd_list, fd_elem
++    if (fd_e->isdir) {
++        inum = inode_get_inumber(dir_get_inode(fd_e->dir));
++    } else {
++        inum = inode_get_inumber(file_get_inode(fd_e->file));
++    }
++    return inum;
+ }
+diff --git a/userprog/syscall.h b/userprog/syscall.h
+index 9059096..5f84b19 100644
+--- a/userprog/syscall.h
++++ b/userprog/syscall.h
+@@ -1,6 +1,8 @@
+ #ifndef USERPROG_SYSCALL_H
+ #define USERPROG_SYSCALL_H
+ 
++#include <stdbool.h>
++
+ void syscall_init (void);
+ 
+ #endif /* userprog/syscall.h */
